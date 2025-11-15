@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 ANALYSIS_NAME = "syntaxer"
 ANALYSIS_VERSION = "1.0"
-ANALYSIS_GROUP = "The Rice Theorem Cookers"
+ANALYSIS_GROUP = "Group 21"
 ANALYSIS_TAGS = ["syntactic", "python"]
 
 
