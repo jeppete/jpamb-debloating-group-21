@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Iterator
 
 import tree_sitter
 
@@ -29,7 +29,7 @@ class AnalysisContext:
     def text(self, node: tree_sitter.Node | None) -> str:
         return node_text(node, self.source_bytes) if node is not None else ""
 
-    def iter_nodes(self):
+    def iter_nodes(self) -> Iterator[tree_sitter.Node]:
         return iter_nodes(self.tree.root_node)
 
     # ----- collection passes -----

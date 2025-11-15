@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tree_sitter
+
 from ..context import AnalysisContext
 from ..issues import Issue, make_issue
 from ..utils import iter_nodes
@@ -86,7 +88,7 @@ def run_logging_patterns(ctx: AnalysisContext) -> list[Issue]:
     return issues
 
 
-def _is_logging_call(ctx: AnalysisContext, node) -> bool:
+def _is_logging_call(ctx: AnalysisContext, node: tree_sitter.Node) -> bool:
     call = None
     if node.type == "expression_statement" and node.named_child_count == 1:
         child = node.named_children[0]

@@ -16,20 +16,12 @@ if str(ROOT_DIR) not in sys.path:
 from solutions.syntaxer import BloatFinder, Issue  # noqa: E402
 from solutions.syntaxer.utils import create_java_parser  # noqa: E402
 
-methodid = jpamb.getmethodid(
-    "debloat syntax analysis",
-    "0.1",
-    "group 21",
-    ["syntax analysis", "python"],
-    for_science=True,
-)
-
 log = logging.getLogger(__name__)
 
 ANALYSIS_NAME = "syntaxer"
 ANALYSIS_VERSION = "1.0"
 ANALYSIS_GROUP = "The Rice Theorem Cookers"
-ANALYSIS_TAGS = ["syntatic", "python"]
+ANALYSIS_TAGS = ["syntactic", "python"]
 
 
 def resolve_source_path(methodid: jpamb.jvm.AbsMethodID) -> Path:
@@ -48,8 +40,7 @@ def run_analysis(methodid: jpamb.jvm.AbsMethodID) -> tuple[list[Issue], str]:
 
     source_bytes = srcpath.read_bytes()
     tree = parser.parse(source_bytes)
-    finder = BloatFinder(tree, source_bytes)
-    return finder.issues, str(methodid.classname.name)
+    BloatFinder(tree, source_bytes)
 
 
 def main():
