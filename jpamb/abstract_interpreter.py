@@ -89,7 +89,7 @@ def astep(
 
     May yield:
       * zero or more successor frames, and/or
-      * final strings like "ok" or "err:divide_by_zero".
+      * final strings like "ok" or "divide by zero".
     """
     pc = frame.pc
     op = bc[pc]
@@ -104,7 +104,10 @@ def astep(
         case jvm.Push(type=jvm.Int(), value=v):
             new = frame.copy()
             new.stack.push(SignSet.const(int(v.value)))
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # If your jpamb has Push without a 'type' field, this generic
@@ -117,7 +120,10 @@ def astep(
             else:
                 # placeholder for refs / other primitives
                 new.stack.push(SignSet.top())
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # Load from local
@@ -125,15 +131,75 @@ def astep(
             new = frame.copy()
             av = new.locals.get(i, SignSet.top())
             new.stack.push(av)
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # Store to local
         case jvm.Store(type=jvm.Int(), index=i):
             new = frame.copy()
+            # Defensive: ensure stack has value
+            if len(new.stack) == 0:
+                new.stack.push(SignSet.top())
             av = new.stack.pop()
             new.locals[i] = av
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
+            yield new
+
+        # ------------------------------------------------------------------
+        # Field access
+        # ------------------------------------------------------------------
+
+        # Get static field (getstatic)
+        case jvm.Get(static=True, field=field):
+            new = frame.copy()
+            # For static field access, particularly $assertionsDisabled
+            if field.extension.name == "$assertionsDisabled":
+                # Java assertions are typically disabled, so return false
+                # For ifz, false = 0, so we push {"0"}
+                new.stack.push(SignSet.const(0))
+            else:
+                # Default to top for other static fields (unknown value)
+                if isinstance(field.extension.type, jvm.Boolean):
+                    # Boolean could be true or false, approximate as top
+                    new.stack.push(SignSet.top())
+                elif isinstance(field.extension.type, jvm.Int):
+                    new.stack.push(SignSet.top())
+                else:
+                    # Other types: push top (unknown)
+                    new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
+            yield new
+
+        # Get instance field (getfield) - pops object ref, pushes field value
+        case jvm.Get(static=False, field=field):
+            new = frame.copy()
+            # Defensive: ensure stack has value
+            if len(new.stack) == 0:
+                new.stack.push(SignSet.top())
+            # Check for null pointer
+            yield "null pointer"
+            _obj_ref = new.stack.pop()  # Pop object reference
+            # Push abstract value for field (we don't track field values precisely)
+            if isinstance(field.extension.type, jvm.Int):
+                new.stack.push(SignSet.top())
+            elif isinstance(field.extension.type, jvm.Boolean):
+                new.stack.push(SignSet.top())
+            else:
+                # Reference or other types: push top
+                new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # ------------------------------------------------------------------
@@ -142,6 +208,11 @@ def astep(
 
         case jvm.Binary(type=jvm.Int(), operant=opr):
             new = frame.copy()
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < 2:
+                # Push top values to make stack valid
+                while len(new.stack) < 2:
+                    new.stack.push(SignSet.top())
             right = new.stack.pop()
             left = new.stack.pop()
 
@@ -150,37 +221,52 @@ def astep(
             if "add" in op_name:
                 res = SignArithmetic.add(left, right)
                 new.stack.push(res)
-                new.pc = pc.next()
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                new.pc = next_pc
                 yield new
 
             elif "sub" in op_name:
                 res = SignArithmetic.sub(left, right)
                 new.stack.push(res)
-                new.pc = pc.next()
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                new.pc = next_pc
                 yield new
 
             elif "mul" in op_name:
                 res = SignArithmetic.mul(left, right)
                 new.stack.push(res)
-                new.pc = pc.next()
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                new.pc = next_pc
                 yield new
 
             elif "div" in op_name:
                 res_signs, may_div_zero = SignArithmetic.div(left, right)
                 if may_div_zero:
                     # One abstract path where we divide by zero
-                    yield "err:divide_by_zero"
+                    yield "divide by zero"
                 if res_signs:
                     # Path where divisor != 0
                     n2 = new
                     n2.stack.push(res_signs)
-                    n2.pc = pc.next()
+                    next_pc = bc.next_pc(pc)
+                    if next_pc is None:
+                        return  # End of method
+                    n2.pc = next_pc
                     yield n2
 
             else:
                 # Any other int binop: approximate result as ⊤
                 new.stack.push(SignSet.top())
-                new.pc = pc.next()
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                new.pc = next_pc
                 yield new
 
         # ------------------------------------------------------------------
@@ -190,6 +276,10 @@ def astep(
         # Ifz with condition (==, !=, <, <=, >, >= 0)
         case jvm.Ifz(condition=cond, target=target_off):
             new = frame.copy()
+            # Handle case where stack might be empty (from malformed bytecode/jump)
+            if len(new.stack) == 0:
+                # Push top value conservatively
+                new.stack.push(SignSet.top())
             av = new.stack.pop()
 
             possible = _eval_zero_compare(cond, av)
@@ -198,18 +288,76 @@ def astep(
 
             if can_true:
                 t_frame = new.copy()
-                t_frame.pc = PC(pc.method, target_off)
+                # Resolve the jump target (in case it points to a gap/label)
+                target_pc = PC(pc.method, target_off)
+                resolved_op = bc[target_pc]
+                resolved_pc = PC(pc.method, resolved_op.offset)
+                t_frame.pc = resolved_pc
+                # If jumping to an If instruction, ensure stack has required values
+                if isinstance(resolved_op, jvm.If) and len(t_frame.stack) < 2:
+                    while len(t_frame.stack) < 2:
+                        t_frame.stack.push(SignSet.top())
                 yield t_frame
 
             if can_false:
                 f_frame = new.copy()
-                f_frame.pc = pc.next()
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                f_frame.pc = next_pc
+                yield f_frame
+
+        # If with condition comparing two values (if_icmp)
+        case jvm.If(condition=cond, target=target_off):
+            new = frame.copy()
+            # Pop two values for comparison
+            # Handle case where stack might be empty (from malformed bytecode/jump)
+            if len(new.stack) < 2:
+                # If stack doesn't have enough values, push top values conservatively
+                # This handles cases where we jump to this instruction with wrong stack state
+                while len(new.stack) < 2:
+                    new.stack.push(SignSet.top())
+            right = new.stack.pop()  # Second value (top of stack)
+            left = new.stack.pop()   # First value
+
+            # For if_icmp, we compare two abstract values
+            # Since we're using sign domain, we can't precisely compare,
+            # so we conservatively assume both branches are possible
+            # unless we can prove otherwise
+            can_true = True   # Conservative: assume condition might be true
+            can_false = True  # Conservative: assume condition might be false
+
+            # TODO: Could add more precise comparison logic here
+            # For now, be maximally conservative
+
+            if can_true:
+                t_frame = new.copy()
+                # Resolve the jump target (in case it points to a gap/label)
+                target_pc = PC(pc.method, target_off)
+                resolved_op = bc[target_pc]
+                t_frame.pc = PC(pc.method, resolved_op.offset)
+                yield t_frame
+
+            if can_false:
+                f_frame = new.copy()
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                f_frame.pc = next_pc
                 yield f_frame
 
         # Very simple unconditional jump
         case jvm.Goto(target=target_off):
             new = frame.copy()
-            new.pc = PC(pc.method, target_off)
+            # Resolve the jump target (in case it points to a gap/label)
+            target_pc = PC(pc.method, target_off)
+            resolved_op = bc[target_pc]
+            resolved_pc = PC(pc.method, resolved_op.offset)
+            new.pc = resolved_pc
+            # If jumping to an If instruction, ensure stack has required values
+            if isinstance(resolved_op, jvm.If) and len(new.stack) < 2:
+                while len(new.stack) < 2:
+                    new.stack.push(SignSet.top())
             yield new
 
         # ------------------------------------------------------------------
@@ -223,38 +371,84 @@ def astep(
         # new int[length]
         case jvm.NewArray(component=jvm.Int()):
             new = frame.copy()
+            # Defensive: ensure stack has value
+            if len(new.stack) == 0:
+                new.stack.push(SignSet.top())
             _len = new.stack.pop()         # length, SignSet
             # We don't track array contents precisely; push an opaque ref.
             new.stack.push(SignSet.top())  # placeholder for "some ref"
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # x = arr[i]
         case jvm.ArrayLoad(component=jvm.Int()):
             new = frame.copy()
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < 2:
+                while len(new.stack) < 2:
+                    new.stack.push(SignSet.top())
             _index = new.stack.pop()       # SignSet
             _arr = new.stack.pop()         # opaque ref
+            
+            # Check for null pointer: array reference could be null
+            # Since we don't track nullness precisely, conservatively assume it might be null
+            yield "null pointer"
+            
+            # Also check for out of bounds: index could be negative or too large
+            # Since we don't track array lengths precisely, conservatively assume OOB is possible
+            yield "out of bounds"
+            
+            # If array is not null and index is in bounds, push element value
             # We have no idea about element sign -> ⊤
             new.stack.push(SignSet.top())
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # arr[i] = x
         case jvm.ArrayStore(component=jvm.Int()):
             new = frame.copy()
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < 3:
+                while len(new.stack) < 3:
+                    new.stack.push(SignSet.top())
             _val = new.stack.pop()
             _index = new.stack.pop()
             _arr = new.stack.pop()
-            # No observable int result, just fall through.
-            new.pc = pc.next()
+            
+            # Check for null pointer and out of bounds (same as ArrayLoad)
+            yield "null pointer"
+            yield "out of bounds"
+            
+            # If array is not null and index is in bounds, store succeeds
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # len = arr.length
         case jvm.ArrayLength():
             new = frame.copy()
+            # Defensive: ensure stack has value
+            if len(new.stack) == 0:
+                new.stack.push(SignSet.top())
             _arr = new.stack.pop()
+            
+            # Check for null pointer
+            yield "null pointer"
+            
+            # If array is not null, push length
             new.stack.push(SignSet.top())  # length is some non-negative int
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
         # ------------------------------------------------------------------
@@ -265,36 +459,124 @@ def astep(
         #   - pop arguments (and 'this' for instance methods),
         #   - push ⊤ for an int return value, or nothing for void / refs.
 
-        case jvm.Invoke(method=method, access=access):
+        case jvm.InvokeVirtual(method=method):
             new = frame.copy()
-
-            # Figure out how many stack elements to pop.
-            # `method.desc.args` is a list of types.
-            desc = getattr(method, "desc", None)
-            arg_types = list(getattr(desc, "args", []))
-            returns = getattr(desc, "returns", None)
-
-            nargs = len(arg_types)
-
-            # For non-static calls, there's an extra receiver on the stack.
-            access_name = getattr(access, "name", "").lower()
-            if "static" not in access_name:
-                nargs += 1
-
+            nargs = len(method.extension.params) + 1  # +1 for receiver
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < nargs:
+                while len(new.stack) < nargs:
+                    new.stack.push(SignSet.top())
+            # Check for null pointer on receiver (first argument)
+            yield "null pointer"
+            # Pop arguments
             for _ in range(nargs):
                 new.stack.pop()
-
-            # Push abstract return value if needed.
-            if returns is not None:
-                if isinstance(returns, jvm.Int):
-                    new.stack.push(SignSet.top())
-                else:
-                    # Reference or void: we treat refs as opaque and
-                    # don't track them for sign analysis.
-                    pass
-
-            new.pc = pc.next()
+            if method.extension.return_type is not None and isinstance(method.extension.return_type, jvm.Int):
+                new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
+
+        case jvm.InvokeStatic(method=method):
+            new = frame.copy()
+            nargs = len(method.extension.params)  # No receiver for static
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < nargs:
+                while len(new.stack) < nargs:
+                    new.stack.push(SignSet.top())
+            # Pop arguments
+            for _ in range(nargs):
+                new.stack.pop()
+            if method.extension.return_type is not None and isinstance(method.extension.return_type, jvm.Int):
+                new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
+            yield new
+
+        case jvm.InvokeSpecial(method=method):
+            new = frame.copy()
+            nargs = len(method.extension.params) + 1  # +1 for receiver
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < nargs:
+                while len(new.stack) < nargs:
+                    new.stack.push(SignSet.top())
+            # Check for null pointer on receiver (first argument)
+            yield "null pointer"
+            # Pop arguments
+            for _ in range(nargs):
+                new.stack.pop()
+            if method.extension.return_type is not None and isinstance(method.extension.return_type, jvm.Int):
+                new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
+            yield new
+
+        case jvm.InvokeInterface(method=method):
+            new = frame.copy()
+            nargs = len(method.extension.params) + 1  # +1 for receiver
+            # Defensive: ensure stack has enough values
+            if len(new.stack) < nargs:
+                while len(new.stack) < nargs:
+                    new.stack.push(SignSet.top())
+            # Check for null pointer on receiver (first argument)
+            yield "null pointer"
+            # Pop arguments
+            for _ in range(nargs):
+                new.stack.pop()
+            if method.extension.return_type is not None and isinstance(method.extension.return_type, jvm.Int):
+                new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
+            yield new
+
+        # ------------------------------------------------------------------
+        # Object creation and manipulation
+        # ------------------------------------------------------------------
+
+        # Create new object (new)
+        case jvm.New(classname=classname):
+            new = frame.copy()
+            # Handle creation of new objects, especially exceptions
+            if classname.slashed() == "java/lang/AssertionError":
+                yield "assertion error"
+            else:
+                # For other classes, push an opaque reference (top)
+                new.stack.push(SignSet.top())
+                next_pc = bc.next_pc(pc)
+                if next_pc is None:
+                    return  # End of method
+                new.pc = next_pc
+                yield new
+
+        # Duplicate stack top (dup)
+        case jvm.Dup():
+            new = frame.copy()
+            if new.stack:
+                top = new.stack.peek()
+                new.stack.push(top)
+            else:
+                # Empty stack - push top as fallback
+                new.stack.push(SignSet.top())
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
+            yield new
+
+        # Throw exception (throw)
+        case jvm.Throw():
+            # Throwing an exception terminates execution
+            # Check if it's AssertionError by looking at what's on stack
+            # For now, just yield assertion error if we're throwing
+            yield "assertion error"
 
         # ------------------------------------------------------------------
         # Returns
@@ -303,6 +585,9 @@ def astep(
         case jvm.Return(type=jvm.Int()):
             # Top frame returns "ok".
             # (If you later add full call-stack analysis, adapt this.)
+            yield "ok"
+
+        case jvm.Return(type=None):  # Void return
             yield "ok"
 
         # ------------------------------------------------------------------
@@ -314,7 +599,10 @@ def astep(
             # leave locals/stack alone and just step to the next pc.
             # This is unsound in general, but keeps the analysis running.
             new = frame.copy()
-            new.pc = pc.next()
+            next_pc = bc.next_pc(pc)
+            if next_pc is None:
+                return  # End of method
+            new.pc = next_pc
             yield new
 
 

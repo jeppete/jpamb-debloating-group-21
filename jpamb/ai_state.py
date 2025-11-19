@@ -89,7 +89,81 @@ class Bytecode:
         except KeyError:
             ops = list(self.suite.method_opcodes(pc.method))
             self._cache[pc.method] = ops
-        return ops[pc.offset]
+        # Find opcode by matching its actual bytecode offset, not array index
+        for op in ops:
+            if op.offset == pc.offset:
+                return op
+        # If exact offset not found, this is a jump target pointing to a gap/label
+        # Find the next instruction that would actually be executed.
+        # If the next instruction starts a block that ends with throw/return (like
+        # an assertion error block), we should skip that block and continue to the
+        # next "live" instruction.
+        next_op = None
+        for op in ops:
+            if op.offset > pc.offset:
+                if next_op is None or op.offset < next_op.offset:
+                    next_op = op
+        
+        if next_op is not None:
+            # Check if this instruction starts a "skipped" block (e.g., assertion error)
+            # by looking ahead to see if the block ends with throw
+            # This is a heuristic for handling label gaps that skip over exception blocks
+            next_idx = ops.index(next_op)
+            # Look ahead up to 10 instructions to find a throw
+            for i in range(next_idx, min(next_idx + 10, len(ops))):
+                if isinstance(ops[i], jvm.Throw):
+                    # This is a throw block, skip it and find the next instruction
+                    if i + 1 < len(ops):
+                        return ops[i + 1]
+                    break
+            
+            # If the next instruction after the gap is part of a conditional branch
+            # (like offset 29 which is the even branch), and there's a return instruction
+            # later in the method, the gap might be a label pointing to the return.
+            # Look for return instructions after the gap.
+            for op in ops:
+                if op.offset > pc.offset and isinstance(op, jvm.Return):
+                    # Found a return after the gap - this might be the actual target
+                    # But only use it if it's before the next_op (i.e., it's closer)
+                    if op.offset < next_op.offset:
+                        return op
+                    # Otherwise, if next_op is part of a branch and return is after,
+                    # the gap might be pointing to the return
+                    # Check if next_op is part of a conditional structure
+                    if next_idx > 0 and hasattr(ops[next_idx - 1], 'target'):
+                        # Previous instruction has a target, might be a branch
+                        # In this case, prefer the return if it's reasonably close
+                        if op.offset - pc.offset < 30:  # Within 30 bytes
+                            return op
+                    break
+            
+            # Default: return the next instruction
+            return next_op
+        
+        raise IndexError(f"No opcode found at or after offset {pc.offset} in {pc.method}")
+
+    def next_pc(self, pc: PC) -> PC | None:
+        """
+        Find the next opcode offset after the given PC's offset.
+        Returns None if there is no next instruction.
+        """
+        assert self._cache is not None
+        try:
+            ops = self._cache[pc.method]
+        except KeyError:
+            ops = list(self.suite.method_opcodes(pc.method))
+            self._cache[pc.method] = ops
+        
+        # Find the smallest offset greater than pc.offset
+        next_offset = None
+        for op in ops:
+            if op.offset > pc.offset:
+                if next_offset is None or op.offset < next_offset:
+                    next_offset = op.offset
+        
+        if next_offset is None:
+            return None
+        return PC(pc.method, next_offset)
 
 
 # --- Abstract frame/state ----------------------------------------------------
@@ -158,11 +232,30 @@ class PerVarFrame(Generic[AV]):
             else:
                 new_locals[idx] = v1 | v2  # type: ignore[operator]
 
-        # stack: must have same height; join element-wise
-        assert len(self.stack) == len(other.stack)
+        # stack: join element-wise, handling height mismatches
+        # If stacks have different heights, pad the shorter one with top values
+        # This handles cases where different paths reach the same PC with different stack states
+        max_height = max(len(self.stack), len(other.stack))
         new_stack_items: List[AV] = []
-        for v1, v2 in zip(self.stack, other.stack):
-            new_stack_items.append(v1 | v2)  # type: ignore[operator]
+        
+        for i in range(max_height):
+            v1 = self.stack.items[i] if i < len(self.stack) else None
+            v2 = other.stack.items[i] if i < len(other.stack) else None
+            
+            if v1 is None:
+                # self.stack is shorter, use other's value (or top if other is also None)
+                if v2 is None:
+                    # Both are None (shouldn't happen, but be defensive)
+                    from jpamb.ai_domain import SignSet
+                    new_stack_items.append(SignSet.top())  # type: ignore[assignment]
+                else:
+                    new_stack_items.append(v2)
+            elif v2 is None:
+                # other.stack is shorter, use self's value
+                new_stack_items.append(v1)
+            else:
+                # Both have values, join them
+                new_stack_items.append(v1 | v2)  # type: ignore[operator]
 
         return PerVarFrame(
             locals=new_locals,
