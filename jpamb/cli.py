@@ -5,6 +5,7 @@ import shutil
 import math
 import sys
 import json
+import os
 from inspect import getsourcelines, getsourcefile
 from collections import Counter
 import matplotlib.pyplot as plt
@@ -284,6 +285,51 @@ def test(suite, program, report, filter, fail_fast, with_python, timeout):
             total += score
 
     r.output(f"Total {total:0.2f}")
+
+
+@cli.command()
+@click.option(
+    "--trace-dir",
+    default="traces",
+    help="Directory to write trace files to.",
+    type=click.Path(path_type=Path),
+)
+@click.pass_obj
+def trace(suite, trace_dir):
+    """Generate dynamic analysis traces for the interpreter."""
+    
+    # Ensure traces directory exists
+    os.makedirs(trace_dir, exist_ok=True)
+    
+    # Import the interpreter
+    sys.path.insert(0, str(Path(__file__).parent.parent / "solutions"))
+    from interpreter import execute, CoverageTracker, ValueTracer
+    
+    log.info(f"Generating traces in {trace_dir}")
+    
+    total_methods = 0
+    for case in suite.cases:
+        log.info(f"Tracing {case.methodid}")
+        
+        # Create tracers
+        coverage = CoverageTracker()
+        tracer = ValueTracer()
+        
+        try:
+            result = execute(
+                case.methodid, 
+                case.input, 
+                coverage=coverage, 
+                tracer=tracer,
+                trace_dir=trace_dir
+            )
+            log.debug(f"  {case.input.encode()} -> {result}")
+        except Exception as e:
+            log.error(f"Failed to trace {case}: {e}")
+            
+        total_methods += 1
+    
+    log.success(f"Generated traces for {total_methods} methods in {trace_dir}")
 
 
 @cli.command()

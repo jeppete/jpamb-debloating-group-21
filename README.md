@@ -417,3 +417,71 @@ consistent builds across systems.
 
 **Warning:** If you create new folders and use docker, it might create them as root. To fix
 this either use podman or change the permissions after.
+
+## Dynamic Analysis Tracing
+
+The interpreter now supports generating dynamic analysis traces for all JPAMB test cases. These traces capture coverage information and value analysis for local variables during execution.
+
+### Generating Traces
+
+To generate traces for all test cases:
+
+```bash
+uv run jpamb trace --trace-dir traces
+```
+
+This will execute every test case with the interpreter and generate JSON trace files in the specified directory.
+
+### Trace File Format
+
+Each trace file contains:
+- **Coverage data**: Executed PCs, uncovered PCs, and branch outcomes
+- **Value analysis**: For each local variable, tracks sign, interval, and properties like always_positive
+
+Example trace file (`traces/jpamb.cases.Simple_assertPositive_IV.json`):
+
+```json
+{
+  "method": "jpamb.cases.Simple.assertPositive:(I)V",
+  "coverage": {
+    "executed_pcs": [0, 1, 2, 3, 8],
+    "uncovered_pcs": [],
+    "branches": {
+      "1": [false],
+      "3": [true]
+    }
+  },
+  "values": {
+    "local_0": {
+      "samples": [1, 1, 1, 1, 1],
+      "always_positive": true,
+      "never_negative": true,
+      "never_zero": true,
+      "sign": "positive",
+      "interval": [1, null]
+    }
+  }
+}
+```
+
+This trace shows that local variable 0 (the input parameter) was always positive (value 1) across all executions, and various branch conditions were evaluated.
+
+### Testing the Implementation
+
+To verify that the interpreter tracing implementation is working correctly:
+
+```bash
+# Run all tracing tests
+uv run pytest test/test_tracing.py -v
+
+# Test CLI trace command
+uv run jpamb trace --help
+
+# Generate sample traces (first few test cases)
+uv run jpamb trace --trace-dir traces
+
+# Run all tests to ensure nothing is broken
+uv run pytest -v
+```
+
+All tracing tests should pass, and trace files should be generated successfully in JSON format.
