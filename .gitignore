@@ -13,6 +13,10 @@ result.json
 
 reports/
 
+# Generated trace files
+test_traces/
+traces/
+
 jpamb.egg-info/
 dist/
 *.pyd
