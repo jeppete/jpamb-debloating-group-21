@@ -1,6 +1,8 @@
 import jpamb
 from jpamb import jvm
 from dataclasses import dataclass
+from typing import Dict, List, Set, Optional, Union
+from enum import Enum
 
 import sys
 import json
@@ -10,6 +12,40 @@ from loguru import logger
 
 logger.remove()
 logger.add(sys.stderr, format="[{level}] {message}")
+
+
+class AbstractDomain(Enum):
+    """Abstract domain types for static analysis."""
+    TOP = "⊤"  # Unknown/any value
+    BOTTOM = "⊥"  # Impossible/no value
+    ZERO = "0"  # Exactly zero
+    POSITIVE = "+"  # Positive integers
+    NEGATIVE = "-"  # Negative integers
+    NON_ZERO = "≠0"  # Non-zero integers
+    NON_NEGATIVE = "≥0"  # Zero or positive
+    NON_POSITIVE = "≤0"  # Zero or negative
+
+
+@dataclass
+class AbstractState:
+    """Abstract state for a program point."""
+    locals: Dict[int, AbstractDomain]
+    pc: int
+    method: jvm.AbsMethodID
+    
+    def encode(self) -> str:
+        """Encode abstract state for static analysis tools."""
+        locals_str = ",".join(f"{idx}:{domain.value}" for idx, domain in sorted(self.locals.items()))
+        return f"{self.method}:{self.pc}[{locals_str}]"
+
+
+@dataclass
+class RefinementResult:
+    """Result of trace refinement process."""
+    initial_states: List[AbstractState]
+    refined_coverage: Dict[int, Set[AbstractDomain]]
+    confidence: float  # 0.0 to 1.0
+    method: jvm.AbsMethodID
 
 
 @dataclass
@@ -557,6 +593,142 @@ class ValueTracer:
             result[f"local_{idx}"] = analysis
         
         return result
+
+
+class TraceRefiner:
+    """Refines dynamic traces back to initial abstract states for static analysis."""
+    
+    def __init__(self):
+        self.refinements = {}
+    
+    def refine_trace(self, trace_data: Dict) -> RefinementResult:
+        """Refine a single trace to extract initial abstract states."""
+        method = jvm.AbsMethodID.decode(trace_data["method"])
+        
+        # Extract initial abstract states from value analysis
+        initial_states = []
+        refined_coverage = {}
+        
+        if "values" in trace_data:
+            initial_abstract_locals = {}
+            
+            for local_key, analysis in trace_data["values"].items():
+                local_idx = int(local_key.split("_")[1])
+                domain = self._infer_abstract_domain(analysis)
+                initial_abstract_locals[local_idx] = domain
+            
+            # Create initial abstract state
+            if initial_abstract_locals:
+                initial_state = AbstractState(
+                    locals=initial_abstract_locals,
+                    pc=0,  # Start at method entry
+                    method=method
+                )
+                initial_states.append(initial_state)
+        
+        # Refine coverage information with abstract domains
+        if "coverage" in trace_data:
+            for pc in trace_data["coverage"]["executed_pcs"]:
+                refined_coverage[pc] = {self._get_pc_domain(pc, trace_data)}
+        
+        # Calculate confidence based on coverage completeness
+        confidence = self._calculate_confidence(trace_data)
+        
+        return RefinementResult(
+            initial_states=initial_states,
+            refined_coverage=refined_coverage,
+            confidence=confidence,
+            method=method
+        )
+    
+    def _infer_abstract_domain(self, analysis: Dict) -> AbstractDomain:
+        """Infer abstract domain from concrete value analysis."""
+        if analysis["sign"] == "positive":
+            return AbstractDomain.POSITIVE
+        elif analysis["sign"] == "negative":
+            return AbstractDomain.NEGATIVE
+        elif analysis["sign"] == "zero":
+            return AbstractDomain.ZERO
+        elif analysis["never_negative"]:
+            return AbstractDomain.NON_NEGATIVE
+        elif analysis["never_zero"]:
+            return AbstractDomain.NON_ZERO
+        else:
+            return AbstractDomain.TOP  # Mixed or unknown
+    
+    def _get_pc_domain(self, pc: int, trace_data: Dict) -> AbstractDomain:
+        """Get abstract domain for a specific program counter."""
+        # For now, return TOP as we need more sophisticated analysis
+        # This could be enhanced to track domains per PC
+        return AbstractDomain.TOP
+    
+    def _calculate_confidence(self, trace_data: Dict) -> float:
+        """Calculate confidence score based on trace completeness."""
+        if "coverage" not in trace_data:
+            return 0.5
+        
+        coverage = trace_data["coverage"]
+        executed = len(coverage["executed_pcs"])
+        uncovered = len(coverage["uncovered_pcs"])
+        total = executed + uncovered
+        
+        if total == 0:
+            return 0.5
+        
+        # Higher confidence with better coverage
+        coverage_ratio = executed / total
+        
+        # Boost confidence if we have branch information
+        branch_boost = 0.1 if coverage["branches"] else 0.0
+        
+        return min(0.95, coverage_ratio + branch_boost)
+    
+    def refine_multiple_traces(self, trace_files: List[Path]) -> Dict[str, RefinementResult]:
+        """Refine multiple trace files and return results keyed by method name."""
+        results = {}
+        
+        for trace_file in trace_files:
+            try:
+                with open(trace_file, 'r') as f:
+                    trace_data = json.load(f)
+                
+                refinement = self.refine_trace(trace_data)
+                method_key = trace_data["method"]
+                results[method_key] = refinement
+                
+            except Exception as e:
+                logger.error(f"Failed to refine trace {trace_file}: {e}")
+        
+        return results
+    
+    def generate_initial_state_file(self, refinement_results: Dict[str, RefinementResult], 
+                                   output_path: Path) -> None:
+        """Generate initial abstract state file for static analysis tools."""
+        states_data = {
+            "format_version": "1.0",
+            "generation_timestamp": json.dumps(os.path.getmtime(__file__)),
+            "description": "Initial abstract states refined from dynamic analysis traces",
+            "methods": {}
+        }
+        
+        for method_name, result in refinement_results.items():
+            method_data = {
+                "initial_states": [state.encode() for state in result.initial_states],
+                "confidence": result.confidence,
+                "coverage_points": list(result.refined_coverage.keys()),
+                "abstract_domains": {
+                    str(pc): [domain.value for domain in domains]
+                    for pc, domains in result.refined_coverage.items()
+                }
+            }
+            states_data["methods"][method_name] = method_data
+        
+        # Write to file
+        os.makedirs(output_path.parent, exist_ok=True)
+        with open(output_path, 'w') as f:
+            json.dump(states_data, f, indent=2)
+        
+        logger.info(f"Generated initial state file: {output_path}")
 
 
 # Main execution when run directly

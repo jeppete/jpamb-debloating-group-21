@@ -334,6 +334,58 @@ def trace(suite, trace_dir):
 
 @cli.command()
 @click.option(
+    "--trace-dir",
+    default="traces",
+    help="Directory containing trace files to refine.",
+    type=click.Path(exists=True, path_type=Path),
+)
+@click.option(
+    "--output",
+    default="initial_states.json",
+    help="Output file for initial abstract states.",
+    type=click.Path(path_type=Path),
+)
+@click.pass_obj
+def refine(suite, trace_dir, output):
+    """Refine dynamic traces to initial abstract states for static analysis."""
+    
+    # Import the refiner
+    sys.path.insert(0, str(Path(__file__).parent.parent / "solutions"))
+    from interpreter import TraceRefiner
+    
+    log.info(f"Refining traces from {trace_dir}")
+    
+    # Find all trace files
+    trace_files = list(Path(trace_dir).glob("*.json"))
+    if not trace_files:
+        log.error(f"No trace files found in {trace_dir}")
+        return
+    
+    # Create refiner and process traces
+    refiner = TraceRefiner()
+    refinement_results = refiner.refine_multiple_traces(trace_files)
+    
+    if not refinement_results:
+        log.error("No refinement results generated")
+        return
+    
+    # Generate initial state file
+    output_path = Path(output)
+    refiner.generate_initial_state_file(refinement_results, output_path)
+    
+    # Summary statistics
+    total_methods = len(refinement_results)
+    avg_confidence = sum(r.confidence for r in refinement_results.values()) / total_methods
+    high_confidence_count = sum(1 for r in refinement_results.values() if r.confidence > 0.8)
+    
+    log.success(f"Refined {total_methods} methods")
+    log.info(f"Average confidence: {avg_confidence:.2f}")
+    log.info(f"High confidence (>0.8): {high_confidence_count}/{total_methods}")
+    log.success(f"Generated initial state file: {output_path}")
+
+
+@cli.command()
+@click.option(
     "--with-python/--no-with-python",
     "-W/-noW",
     help="the analysis is a python script, which should run in the same interpreter as jpamb.",
