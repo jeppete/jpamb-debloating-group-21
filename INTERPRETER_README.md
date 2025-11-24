@@ -75,10 +75,14 @@ uv run jpamb refine --trace-dir traces --output initial_states.json
 Run a specific method with detailed tracing:
 
 ```bash
+# Using jpamb interpret command (recommended)
+uv run jpamb interpret --filter "Simple.divideByN" --with-python solutions/interpreter.py
+
+# Direct execution for debugging
 uv run python solutions/interpreter.py 'jpamb.cases.Simple.divideByN:(I)I' '(5)'
 ```
 
-**Parameters:**
+**Parameters for direct execution:**
 - First argument: Method signature in format `package.Class.method:(params)returnType`
 - Second argument: Input values in format `(value1,value2,...)`
 
@@ -104,19 +108,19 @@ uv run jpamb --help
 ### Step 1: Generate Traces
 ```bash
 # Create traces for all test methods
-uv run jpamb trace --trace-dir my_traces
+uv run jpamb trace --trace-dir traces
 ```
 
 ### Step 2: Refine to Abstract States
 ```bash
 # Convert traces to abstract states for static analysis
-uv run jpamb refine --trace-dir my_traces --output my_states.json
+uv run jpamb refine --trace-dir traces --output my_states.json
 ```
 
 ### Step 3: Analyze Results
 ```bash
 # View generated files
-ls my_traces/          # Individual trace JSON files
+ls traces/          # Individual trace JSON files
 cat my_states.json     # Abstract states summary
 ```
 
@@ -186,19 +190,32 @@ The interpreter uses the following abstract domains:
 
 ## Testing
 
-### Run Dynamic Analysis Tests
+### Run Interpreter Tests
 ```bash
-uv run python -m pytest test/test_tracing.py -v
+# Test the interpreter implementation
+uv run jpamb test --filter "Simple" --with-python solutions/interpreter.py
 ```
 
-### Run Refinement Tests  
+### Run Specific Test Categories
 ```bash
+# Test dynamic analysis components
+uv run jpamb test --filter "Simple" --with-python solutions/interpreter.py
+
+# Test refinement components (unit tests)
 uv run python -m pytest test/test_refinement.py -v
+
+# Run all Python unit tests
+uv run python -m pytest test/ -v
 ```
 
-### Run All Tests
+### Validate Complete Workflow
 ```bash
-uv run python -m pytest test/ -v
+# Test interpreter with jpamb CLI
+uv run jpamb interpret --filter "Simple" --with-python solutions/interpreter.py
+
+# Test trace generation and refinement
+uv run jpamb trace --trace-dir test_traces
+uv run jpamb refine --trace-dir test_traces --output test_states.json
 ```
 
 ## Troubleshooting
@@ -218,10 +235,10 @@ ls traces/
 uv run jpamb trace --trace-dir traces  # Generate traces first
 ```
 
-**Issue:** `command not found: python`
+**Issue:** `command not found: jpamb`
 ```bash
-# Use uv to run python in the correct environment
-uv run python solutions/interpreter.py ...
+# Ensure you're using uv to run jpamb commands
+uv run jpamb --help
 ```
 
 ### Debug Mode
