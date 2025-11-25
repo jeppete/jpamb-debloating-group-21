@@ -5,6 +5,7 @@ import shutil
 import math
 import sys
 import json
+import os
 from inspect import getsourcelines, getsourcefile
 from collections import Counter
 import matplotlib.pyplot as plt
@@ -284,6 +285,103 @@ def test(suite, program, report, filter, fail_fast, with_python, timeout):
             total += score
 
     r.output(f"Total {total:0.2f}")
+
+
+@cli.command()
+@click.option(
+    "--trace-dir",
+    default="traces",
+    help="Directory to write trace files to.",
+    type=click.Path(path_type=Path),
+)
+@click.pass_obj
+def trace(suite, trace_dir):
+    """Generate dynamic analysis traces for the interpreter."""
+    
+    # Ensure traces directory exists
+    os.makedirs(trace_dir, exist_ok=True)
+    
+    # Import the interpreter
+    sys.path.insert(0, str(Path(__file__).parent.parent / "solutions"))
+    from interpreter import execute, CoverageTracker, ValueTracer
+    
+    log.info(f"Generating traces in {trace_dir}")
+    
+    total_methods = 0
+    for case in suite.cases:
+        log.info(f"Tracing {case.methodid}")
+        
+        # Create tracers
+        coverage = CoverageTracker(case.methodid)
+        tracer = ValueTracer()
+        
+        try:
+            result = execute(
+                case.methodid, 
+                case.input, 
+                coverage=coverage, 
+                tracer=tracer,
+                trace_dir=trace_dir
+            )
+            log.debug(f"  {case.input.encode()} -> {result}")
+        except Exception as e:
+            log.error(f"Failed to trace {case}: {e}")
+            
+        total_methods += 1
+    
+    log.success(f"Generated traces for {total_methods} methods in {trace_dir}")
+
+
+@cli.command()
+@click.option(
+    "--trace-dir",
+    default="traces",
+    help="Directory containing trace files to refine.",
+    type=click.Path(exists=True, path_type=Path),
+)
+@click.option(
+    "--output",
+    default="initial_states.json",
+    help="Output file for initial abstract states.",
+    type=click.Path(path_type=Path),
+)
+@click.pass_obj
+def refine(suite, trace_dir, output):
+    """Refine dynamic traces to initial abstract states for static analysis."""
+    
+    # Import the refiner
+    sys.path.insert(0, str(Path(__file__).parent.parent / "solutions"))
+    from interpreter import TraceRefiner
+    
+    log.info(f"Refining traces from {trace_dir}")
+    
+    # Find all trace files
+    trace_files = list(Path(trace_dir).glob("*.json"))
+    if not trace_files:
+        log.error(f"No trace files found in {trace_dir}")
+        return
+    
+    # Create refiner and process traces
+    refiner = TraceRefiner()
+    refinement_results = refiner.refine_multiple_traces(trace_files)
+    
+    if not refinement_results:
+        log.error("No refinement results generated")
+        return
+    
+    # Generate initial state file
+    output_path = Path(output)
+    refiner.generate_initial_state_file(refinement_results, output_path)
+    
+    # Summary statistics
+    total_methods = len(refinement_results)
+    avg_confidence = sum(r.confidence for r in refinement_results.values()) / total_methods
+    high_confidence_count = sum(1 for r in refinement_results.values() if r.confidence > 0.8)
+    
+    log.success(f"Refined {total_methods} methods")
+    log.info(f"Average confidence: {avg_confidence:.2f}")
+    log.info(f"High confidence (>0.8): {high_confidence_count}/{total_methods}")
+    log.success(f"Generated initial state file: {output_path}")
 
 
 @cli.command()

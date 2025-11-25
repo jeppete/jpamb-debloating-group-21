@@ -13,6 +13,14 @@ result.json
 
 reports/
 
+# Generated trace files
+traces/
+
+# Generated output files from interpreter
+initial_states.json
+*_states.json
+*.trace.json
+
 jpamb.egg-info/
 dist/
 *.pyd
