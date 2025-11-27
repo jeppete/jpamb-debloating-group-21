@@ -73,19 +73,32 @@ def run(cmd: list[str], /, timeout=2.0, logout=None, logerr=None, **kwargs):
         )
         assert cp and cp.stdout and cp.stderr
 
+        # Calculate remaining timeout right after starting process
+        remaining_timeout = None
+        if end:
+            remaining_timeout = max(0.0, end - monotonic())
+
         def log_lines(cp):
             assert cp.stderr
-            with cp.stderr:
-                for line in iter(cp.stderr.readline, ""):
-                    stderr.append(line)
-                    logerr(line[:-1])
+            try:
+                with cp.stderr:
+                    for line in iter(cp.stderr.readline, ""):
+                        stderr.append(line)
+                        logerr(line[:-1])
+            except (ValueError, OSError):
+                # File handle was closed (process completed/timeout)
+                pass
 
         def save_result(cp):
             assert cp.stdout
-            with cp.stdout:
-                for line in iter(cp.stdout.readline, ""):
-                    stdout.append(line)
-                    logout(line[:-1])
+            try:
+                with cp.stdout:
+                    for line in iter(cp.stdout.readline, ""):
+                        stdout.append(line)
+                        logout(line[:-1])
+            except (ValueError, OSError):
+                # File handle was closed (process completed/timeout)
+                pass
 
         terr = threading.Thread(
             target=log_lines,
@@ -100,9 +113,14 @@ def run(cmd: list[str], /, timeout=2.0, logout=None, logerr=None, **kwargs):
         )
         tout.start()
 
-        terr.join(end and end - monotonic())
-        tout.join(end and end - monotonic())
-        exitcode = cp.wait(end and end - monotonic())
+        # Wait for process first (this is the main operation)
+        # remaining_timeout was already calculated above
+        exitcode = cp.wait(remaining_timeout)
+        
+        # Now wait for threads to finish reading (they should finish quickly after process ends)
+        # Give them a short timeout to avoid blocking forever
+        terr.join(timeout=0.5)
+        tout.join(timeout=0.5)
         end_ns = perf_counter_ns()
 
         if exitcode != 0:
@@ -115,14 +133,21 @@ def run(cmd: list[str], /, timeout=2.0, logout=None, logerr=None, **kwargs):
 
         return ("".join(stdout), end_ns - start_ns)
     except subprocess.CalledProcessError as e:
+        if terr:
+            terr.join(timeout=0.1)
         if tout:
-            tout.join()
+            tout.join(timeout=0.1)
         e.stderr = "".join(stderr)
         e.stdout = "".join(stdout)
         raise e
     except subprocess.TimeoutExpired:
         if cp:
             cp.terminate()
+            # Wait for threads to finish before closing handles
+            if terr:
+                terr.join(timeout=0.1)
+            if tout:
+                tout.join(timeout=0.1)
             if cp.stdout:
                 cp.stdout.close()
             if cp.stderr:
@@ -583,6 +608,7 @@ def build(suite, compile, decompile, document, test, docker):
                     suite.classfile(cl).relative_to(suite.workfolder),
                 ],
                 logerr=log.warning,
+                timeout=60.0,  # Longer timeout for decompilation
             )
             file = suite.decompiledfile(cl)
             file.parent.mkdir(exist_ok=True, parents=True)

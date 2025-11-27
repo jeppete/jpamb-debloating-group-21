@@ -28,7 +28,11 @@ class Opcode(ABC):
     def __post_init__(self):
         for f in fields(self):
             v = getattr(self, f.name)
-            assert isinstance(v, f.type), (
+            # Handle parameterized generics (like tuple[int, ...]) by checking the base type
+            check_type = f.type
+            if hasattr(f.type, '__origin__'):  # Parameterized generic
+                check_type = f.type.__origin__
+            assert isinstance(v, check_type), (
                 f"Expected {f.name!r} to be type {f.type}, but was {v!r}, in {self!r}"
             )
 
@@ -69,6 +73,8 @@ class Opcode(ABC):
                 opr = Incr
             case "goto":
                 opr = Goto
+            case "tableswitch":
+                opr = TableSwitch
             case "return":
                 opr = Return
             case "negate":
@@ -1064,6 +1070,44 @@ class Goto(Opcode):
 
     def __str__(self):
         return f"goto {self.target}"
+
+
+@dataclass(frozen=True, order=True)
+class TableSwitch(Opcode):
+    """The tableswitch opcode that performs a jump table lookup for switch statements.
+
+    According to the JVM spec, tableswitch:
+    - Pops an int value from the operand stack
+    - If value is in range [low, low+len(targets)-1], jumps to targets[value-low]
+    - Otherwise jumps to default target
+    - Used for dense switch statements (consecutive case values)
+    """
+
+    low: int  # Lowest case value
+    default: int  # Default target offset
+    targets: tuple[int, ...]  # Array of target offsets
+
+    @classmethod
+    def from_json(cls, json: dict) -> "Opcode":
+        return cls(
+            offset=json["offset"],
+            low=json["low"],
+            default=json["default"],
+            targets=tuple(json["targets"]),
+        )
+
+    def real(self) -> str:
+        targets_str = ", ".join(str(t) for t in self.targets)
+        return f"tableswitch {self.low}..{self.low + len(self.targets) - 1} -> [{targets_str}], default: {self.default}"
+
+    def semantics(self) -> str | None:
+        return None
+
+    def mnemonic(self) -> str:
+        return "tableswitch"
+
+    def __str__(self):
+        return f"tableswitch low={self.low} default={self.default} targets={self.targets}"
 
 
 @dataclass(frozen=True, order=True)
