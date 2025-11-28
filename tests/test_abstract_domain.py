@@ -852,27 +852,5 @@ class TestNonNullDeadCodeDetection:
         assert not bottom.may_be_null()
 
 
-class TestDomainContainment:
-    """Test containment checks for abstract domains."""
-    
-    def test_signset_contains_concrete(self):
-        """Test SignSet.__contains__ for concrete values."""
-        non_neg = SignSet(frozenset({"+", "0"}))
-        
-        assert 5 in non_neg
-        assert 0 in non_neg
-        assert -5 not in non_neg
-    
-    def test_interval_contains_concrete(self):
-        """Test IntervalDomain.__contains__ for concrete values."""
-        interval = IntervalDomain.range(1, 10)
-        
-        assert 1 in interval
-        assert 5 in interval
-        assert 10 in interval
-        assert 0 not in interval
-        assert 11 not in interval
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

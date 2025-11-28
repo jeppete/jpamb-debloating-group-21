@@ -804,7 +804,6 @@ def analyze_with_ir(
         >>> outcomes, visited, unreachable = analyze_with_ir(ir, init)
     """
     # Import here to avoid circular dependency
-    from solutions.ir import MethodIR
     
     # Get all PCs from CFG
     all_pcs = set(ir.cfg.keys())
@@ -860,7 +859,6 @@ def analyze_with_ir(
 
 def _build_initial_frame_from_ir(ir: "MethodIR", init_locals: Dict[int, SignSet] | None) -> PerVarFrame[SignSet]:
     """Build initial abstract frame from MethodIR."""
-    from solutions.ir import MethodIR
     
     # Build the full method ID string like "jpamb.cases.Simple.assertPositive:(I)V"
     full_method_id = f"{ir.class_name}.{ir.method_id}"
@@ -880,7 +878,7 @@ def _process_ir_node(node: "CFGNode", frame: PerVarFrame[SignSet], ir: "MethodIR
     
     This maps IR node types to abstract interpretation semantics.
     """
-    from solutions.ir import NodeType, CFGNode
+    from solutions.ir import NodeType
     
     results = []
     n = frame.copy()

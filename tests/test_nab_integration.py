@@ -25,7 +25,8 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Import NAB integration module
+# Import NAB integration module and NonNullDomain
+from solutions.abstract_domain import NonNullDomain
 from solutions.nab_integration import (
     integrate_abstractions,
     integrate_abstractions_full,
@@ -39,7 +40,6 @@ from solutions.nab_integration import (
     process_example,
     process_example_reduced,
     inform_each_other,
-    AbstractValue,
     IntegrationResult,
     ReducedProductState,
     sign_positive,
@@ -47,13 +47,11 @@ from solutions.nab_integration import (
     sign_zero,
     sign_non_negative,
     sign_non_positive,
-    sign_non_zero,
 )
 
 # Import abstract domains
 from solutions.abstract_domain import (
     SignSet,
-    SignArithmetic,
     IntervalDomain,
     IntervalValue,
 )
@@ -830,8 +828,6 @@ class TestIntegrationWithReducedProduct:
 # These tests verify the extended reduced product that includes NonNullDomain
 # as a third abstraction, qualifying for IAB (Implement Novel Abstractions).
 # =============================================================================
-
-from solutions.abstract_domain import NonNullDomain, NullnessValue
 
 
 class TestReducedProductStateNonNullCreation:

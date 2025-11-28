@@ -15,8 +15,8 @@ DTU 02242 Program Analysis - Group 21
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from jpamb.jvm import opcode as opc
 from solutions.ir import CFGNode, BasicBlock, ExceptionHandler, NodeType

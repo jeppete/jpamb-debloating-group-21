@@ -21,7 +21,6 @@ Author: Group 21
 """
 
 import struct
-import copy
 import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Tuple, Optional, Any
@@ -1014,7 +1013,6 @@ def evaluate_ncr(
     
     Returns statistics on bytecode size reduction.
     """
-    from pathlib import Path
     
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     

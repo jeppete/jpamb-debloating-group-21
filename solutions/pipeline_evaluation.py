@@ -25,8 +25,8 @@ import os
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional, Any
-from dataclasses import dataclass, field
+from typing import Dict, List, Set, Tuple, Optional
+from dataclasses import dataclass
 
 # Add project path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -235,15 +235,15 @@ def _format_instruction(bc: dict) -> str:
     elif opr == 'incr':
         return f"IINC local_{bc.get('index', 0)} by {bc.get('amount', 1)}"
     elif opr == 'negate':
-        return f"NEG"
+        return "NEG"
     elif opr == 'newarray':
         return f"NEWARRAY {bc.get('dim', 1)}D"
     elif opr == 'arraylength':
         return "ARRAYLENGTH"
     elif opr == 'array_load':
-        return f"ARRAYLOAD"
+        return "ARRAYLOAD"
     elif opr == 'array_store':
-        return f"ARRAYSTORE"
+        return "ARRAYSTORE"
     else:
         return opr.upper()
 
@@ -332,15 +332,15 @@ def step_iin(method_id: str, verbose: bool = True) -> IINResult:
     
     if verbose:
         print(f"\nTrace file: {trace_path}")
-        print(f"\nExecution Coverage:")
+        print("\nExecution Coverage:")
         print(f"  Executed PCs: {sorted(executed_pcs)}")
         print(f"  Uncovered PCs: {sorted(uncovered_pcs)}")
         
-        print(f"\nBranch Outcomes:")
+        print("\nBranch Outcomes:")
         for pc, outcomes in sorted(branch_outcomes.items()):
             print(f"  PC {pc}: {outcomes}")
         
-        print(f"\nObserved Values:")
+        print("\nObserved Values:")
         for idx, vals in sorted(samples.items()):
             if vals:
                 print(f"  local_{idx}: {vals[:10]}{'...' if len(vals) > 10 else ''}")
@@ -453,7 +453,7 @@ def step_iai(
         init_locals[idx] = state.sign
     
     if verbose:
-        print(f"\nInitial Abstract State:")
+        print("\nInitial Abstract State:")
         for idx, sign in init_locals.items():
             print(f"  local_{idx} = {sign}")
     
@@ -467,7 +467,7 @@ def step_iai(
     unreachable = isy_result.all_offsets - visited
     
     if verbose:
-        print(f"\nResults:")
+        print("\nResults:")
         print(f"  Visited PCs: {sorted(visited)}")
         print(f"  All PCs: {sorted(isy_result.all_offsets)}")
         print(f"  Unreachable PCs: {sorted(unreachable)}")
@@ -741,7 +741,7 @@ def run_pipeline_all(verbose: bool = False, regenerate_traces: bool = True) -> L
             return []
     else:
         print(f"\nUsing existing traces in {traces_dir}/")
-        print(f"  (Use --regenerate to regenerate traces)")
+        print("  (Use --regenerate to regenerate traces)")
     
     print("\n" + "─" * 80)
     print("PHASE 2: Analyze All Methods (ISY → NAN → IAI → NCR)")
@@ -786,7 +786,7 @@ def run_pipeline_all(verbose: bool = False, regenerate_traces: bool = True) -> L
     print(f"Methods with dead code: {len(dead_code_found)}")
     
     if dead_code_found:
-        print(f"\nMethods with dead code:")
+        print("\nMethods with dead code:")
         for r in dead_code_found:
             pct = r.iai.dead_code_count / r.isy.instruction_count * 100
             print(f"  {r.method_id}: {r.iai.dead_code_count} instructions ({pct:.1f}%)")

@@ -271,8 +271,6 @@ class MethodIR:
                                       'assertPositive:(I)V')
             assert ir.cfg[0].successors == [3, 10]  # if branch
         """
-        from solutions.cfg_builder import CFGBuilder
-        from solutions.statement_grouper import StatementGrouper
         
         class_path = Path(class_path)
         
@@ -340,8 +338,6 @@ class MethodIR:
         
         Uses the existing jpamb.model.Suite infrastructure.
         """
-        from solutions.cfg_builder import CFGBuilder
-        from solutions.statement_grouper import StatementGrouper
         
         suite = Suite()
         method_data = suite.findmethod(method_id)

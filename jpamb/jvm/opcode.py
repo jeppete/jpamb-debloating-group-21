@@ -9,7 +9,6 @@ each instruction.
 
 from dataclasses import dataclass, fields
 from abc import ABC, abstractmethod
-from typing import Self
 
 import enum
 import sys

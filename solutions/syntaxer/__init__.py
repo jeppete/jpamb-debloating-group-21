@@ -14,6 +14,9 @@ program understanding.
 DTU 02242 Program Analysis - Group 21
 """
 
+from dataclasses import dataclass
+from typing import Any, Optional
+
 from solutions.syntaxer.source_parser import (
     SourceParser,
     SourceClass,
@@ -115,8 +118,6 @@ class UnifiedAnalyzer:
         Returns:
             AnalysisResult with source and bytecode info
         """
-        from jpamb import jvm
-        
         # Build bytecode IR
         ir = MethodIR.from_suite_method(method_id)
         
@@ -148,7 +149,6 @@ class UnifiedAnalyzer:
             Dict mapping method names to AnalysisResult
         """
         import json
-        from jpamb import jvm
         
         # Load decompiled class
         decompiled_path = self.suite.decompiledfile(class_name)
@@ -183,10 +183,6 @@ class UnifiedAnalyzer:
                 pass
         
         return results
-
-
-from dataclasses import dataclass
-from typing import Any, Optional
 
 
 @dataclass

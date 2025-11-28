@@ -14,9 +14,7 @@ DTU 02242 Program Analysis - Group 21
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Optional
-from collections import defaultdict
 
 from jpamb.jvm import opcode as opc
 from solutions.ir import (
