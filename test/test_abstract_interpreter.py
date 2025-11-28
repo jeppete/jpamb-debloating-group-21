@@ -226,7 +226,7 @@ class TestDeadCodeDetection:
         outcomes, visited = unbounded_abstract_run(suite, method)
         unreachable = get_unreachable_pcs(suite, method)
         
-        print(f"\nassertFalse analysis:")
+        print("\nassertFalse analysis:")
         print(f"  Outcomes: {outcomes}")
         print(f"  Visited PCs: {sorted(visited)}")
         print(f"  Unreachable PCs: {sorted(unreachable)}")
@@ -383,10 +383,10 @@ class TestAllJavaClasses:
                 total_dead += len(unreachable)
                 if len(unreachable) > 0:
                     methods_with_dead += 1
-            except:
+            except Exception:
                 pass
         
-        print(f"\n=== DEAD CODE SUMMARY ===")
+        print("\n=== DEAD CODE SUMMARY ===")
         print(f"Total methods analyzed: {len(all_methods)}")
         print(f"Methods with dead code: {methods_with_dead}")
         print(f"Total instructions visited: {total_visited}")

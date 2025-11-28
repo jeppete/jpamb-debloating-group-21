@@ -554,7 +554,7 @@ def step_iai(
         print(f"  Outcomes: {outcomes}")
         
         if unreachable:
-            print(f"\nDead Code Found:")
+            print("\nDead Code Found:")
             print(f"  Instructions: {len(unreachable)} dead / {len(isy_result.all_offsets)} total")
             print(f"  Statements (fully dead): {len(fully_dead_statements)} / {total_statements} (lines: {sorted(fully_dead_statements)})")
             if partially_dead_statements:

@@ -18,7 +18,7 @@ DTU 02242 Program Analysis - Group 21
 import sys
 import json
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -184,12 +184,12 @@ def print_method_analysis(result: dict, verbose: bool = False):
     print(f"  Dead: {len(result['unreachable_pcs'])} instructions")
     
     if result['dead_instructions']:
-        print(f"\n  Dead Instructions:")
+        print("\n  Dead Instructions:")
         for instr in result['dead_instructions']:
             print(f"    [{instr['offset']:3d}] {instr['instruction']}")
     
     if verbose and result['bytecode']:
-        print(f"\n  Full Bytecode (dead marked with ✗):")
+        print("\n  Full Bytecode (dead marked with ✗):")
         for bc in result['bytecode']:
             offset = bc.get('offset', 0)
             is_dead = offset in result['unreachable_pcs']
