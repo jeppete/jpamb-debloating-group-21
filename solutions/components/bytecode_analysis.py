@@ -106,6 +106,17 @@ class AnalysisResult:
     entry_points: Set[str]
     unreachable_methods: Set[str]
     dead_instructions: Dict[str, Set[int]]  # method -> set of dead offsets
+    total_instructions: int = 0  # Total number of instructions across all methods
+    
+    def get_dead_instruction_count(self) -> int:
+        """Get total count of dead instructions."""
+        return sum(len(offsets) for offsets in self.dead_instructions.values())
+    
+    def get_debloat_percentage(self) -> float:
+        """Calculate percentage of instructions that are dead code."""
+        if self.total_instructions == 0:
+            return 0.0
+        return (self.get_dead_instruction_count() / self.total_instructions) * 100.0
 
 
 class BytecodeAnalyzer:
@@ -158,12 +169,16 @@ class BytecodeAnalyzer:
                 if unreachable:
                     dead_instructions[method_name] = unreachable
         
+        # Count total instructions across all methods
+        total_instructions = sum(len(cfg.nodes) for cfg in self.cfgs.values())
+        
         return AnalysisResult(
             cfgs=self.cfgs,
             call_graph=self.call_graph,
             entry_points=entry_points,
             unreachable_methods=unreachable_methods,
-            dead_instructions=dead_instructions
+            dead_instructions=dead_instructions,
+            total_instructions=total_instructions
         )
     
     def build_cfg(self, method_name: str, code: dict) -> CFG:
@@ -215,10 +230,16 @@ class BytecodeAnalyzer:
                 if default is not None:
                     cfg.add_edge(offset, default)
                 
+                # Handle targets - can be list of ints or list of dicts
                 for case in inst.get("targets", []):
-                    target = case.get("target")
-                    if target is not None:
-                        cfg.add_edge(offset, target)
+                    if isinstance(case, int):
+                        # tableswitch: targets is list of offsets
+                        cfg.add_edge(offset, case)
+                    elif isinstance(case, dict):
+                        # lookupswitch: targets is list of {match, target} dicts
+                        target = case.get("target")
+                        if target is not None:
+                            cfg.add_edge(offset, target)
             
             else:
                 # Normal instruction - fall through
