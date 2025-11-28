@@ -1,7 +1,7 @@
 import jpamb
 from jpamb import jvm
 from dataclasses import dataclass
-from typing import Dict, List, Set, Optional, Union
+from typing import Dict, List, Set
 from enum import Enum
 
 import sys

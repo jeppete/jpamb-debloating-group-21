@@ -7,7 +7,6 @@ import jpamb
 from jpamb import jvm
 
 from solutions.abstract_interpreter import AbstractInterpreter
-from solutions.abstract_domain import SignSet  # or your domain type, if different
 
 
 def find_method(suite: jpamb.Suite, method_str: str) -> jvm.AbsMethodID:

@@ -24,19 +24,15 @@ DTU 02242 Program Analysis - Group 21
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
-from copy import deepcopy
 
 # Import from abstract_domain module
 from solutions.abstract_domain import (
     SignSet,
-    SignArithmetic,
     IntervalDomain,
     IntervalValue,
-    IntervalArithmetic,
     NonNullDomain,
-    NullnessValue,
 )
 
 
@@ -1206,7 +1202,7 @@ if __name__ == "__main__":
         interval=IntervalDomain(IntervalValue(5, 100))
     )
     reduced2.inform_each_other()
-    print(f"  Before: sign=⊤, interval=[5, 100]")
+    print("  Before: sign=⊤, interval=[5, 100]")
     print(f"  After:  sign={reduced2.sign}, interval={reduced2.interval}")
     print(f"  Refinement history: {reduced2.get_refinement_history()}")
     

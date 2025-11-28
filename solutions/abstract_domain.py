@@ -13,6 +13,7 @@ This module provides:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import FrozenSet, Iterable, Literal, Optional, TypeAlias
 
 
@@ -646,9 +647,6 @@ class IntervalArithmetic:
 #
 # Note: This is a different lattice from the lecture domains. In particular,
 # DEFINITELY_NON_NULL and MAYBE_NULL are incomparable (neither subsumes the other).
-
-
-from enum import Enum, auto
 
 
 class NullnessValue(Enum):

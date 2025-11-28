@@ -206,7 +206,7 @@ class SourceParser:
         class_node = self._find_class(tree.root_node, expected_class)
         
         if class_node is None:
-            self.log.warning(f"Could not find class in source")
+            self.log.warning("Could not find class in source")
             return None
         
         class_name = self._get_class_name(class_node)

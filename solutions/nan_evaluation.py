@@ -21,19 +21,16 @@ import json
 # Add project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import jpamb
 from jpamb import jvm
 from jpamb.model import Suite
 
 from solutions.abstract_interpreter import (
     unbounded_abstract_run,
     get_unreachable_pcs,
-    bounded_abstract_run,
 )
 from solutions.abstract_domain import SignSet
 from solutions.nab_integration import (
     ReducedProductState,
-    integrate_abstractions,
     extract_samples_from_trace,
 )
 

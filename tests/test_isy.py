@@ -24,14 +24,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from solutions.ir import (
-    MethodIR, CFGNode, Statement, BasicBlock, ExceptionHandler,
+    MethodIR, ExceptionHandler,
     NodeType, StatementType
 )
 from solutions.cfg_builder import CFGBuilder, classify_opcode, build_cfg_from_json
 from solutions.statement_grouper import StatementGrouper, group_statements
 from solutions.syntaxer import (
-    SourceParser, UnifiedAnalyzer, AnalysisResult,
-    parse_java_source
+    SourceParser, UnifiedAnalyzer
 )
 
 from jpamb.model import Suite

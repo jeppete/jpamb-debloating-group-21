@@ -18,8 +18,6 @@ NCR Requirements verified:
 import pytest
 import sys
 import os
-import json
-import struct
 import subprocess
 import shutil
 from pathlib import Path
@@ -380,7 +378,7 @@ class TestJVMCompatibility:
     
     def test_nop_replacement_preserves_semantics(self, class_dir, output_dir):
         """Test that NOP replacement preserves program semantics."""
-        from solutions.code_rewriter import CodeRewriter, ClassFileParser
+        from solutions.code_rewriter import ClassFileParser
         
         # This test verifies our strategy:
         # Replacing dead code with NOPs is always safe because:

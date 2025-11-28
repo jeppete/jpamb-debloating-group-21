@@ -16,12 +16,10 @@ DTU 02242 Program Analysis - Group 21
 import pytest
 import sys
 from pathlib import Path
-from typing import Dict, List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import jpamb
 from jpamb import jvm
 from jpamb.model import Suite
 
@@ -33,9 +31,7 @@ from solutions.abstract_interpreter import (
 from solutions.abstract_domain import SignSet
 from solutions.nab_integration import (
     ReducedProductState,
-    integrate_abstractions,
     extract_samples_from_trace,
-    refine_from_trace,
 )
 
 
@@ -348,7 +344,7 @@ class TestNANRequirements:
         
         # Import and test it works
         sys.path.insert(0, str(eval_path.parent))
-        from nan_evaluation import evaluate_method, get_refined_init_from_samples
+        from nan_evaluation import evaluate_method
         
         suite = Suite()
         result = evaluate_method(
