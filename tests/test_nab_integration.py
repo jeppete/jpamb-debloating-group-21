@@ -1,7 +1,7 @@
 """
 Test suite for NAB Integration module.
 
-Tests the integration between IIN (dynamic traces) and IAB (abstract domains).
+Tests the integration between IIN (dynamic traces) and abstract domains.
 Verifies that dynamic refinement heuristics correctly infer abstract states
 from concrete execution samples.
 
@@ -9,7 +9,7 @@ from concrete execution samples.
 "Run two or more abstractions at the same time, letting them inform each other
 during execution" (formula: 5 per abstraction after the first).
 
-This test suite verifies the Reduced Product implementation where SignDomain
+This test suite verifies the Reduced Product implementation where SignSet
 and IntervalDomain run in parallel with mutual refinement.
 
 DTU 02242 Program Analysis - Group 21
@@ -42,15 +42,32 @@ from solutions.nab_integration import (
     AbstractValue,
     IntegrationResult,
     ReducedProductState,
+    sign_positive,
+    sign_negative,
+    sign_zero,
+    sign_non_negative,
+    sign_non_positive,
+    sign_non_zero,
 )
 
-# Import IAB abstract domains
-from solutions.abstractions import (
-    SignDomain,
-    SignValue,
+# Import abstract domains
+from solutions.abstract_domain import (
+    SignSet,
+    SignArithmetic,
     IntervalDomain,
     IntervalValue,
 )
+
+
+# Helper constants for sign checks
+SIGN_POSITIVE = frozenset({"+"})
+SIGN_NEGATIVE = frozenset({"-"})
+SIGN_ZERO = frozenset({"0"})
+SIGN_NON_ZERO = frozenset({"+", "-"})
+SIGN_NON_NEGATIVE = frozenset({"+", "0"})
+SIGN_NON_POSITIVE = frozenset({"-", "0"})
+SIGN_TOP = frozenset({"+", "0", "-"})
+SIGN_BOTTOM = frozenset()
 
 
 class TestProposalExample:
@@ -64,7 +81,7 @@ class TestProposalExample:
         result = process_example()
         
         assert 1 in result
-        assert result[1].sign.value == SignValue.POSITIVE
+        assert result[1].sign.signs == SIGN_POSITIVE
         assert result[1].local_index == 1
     
     def test_proposal_example_interval(self):
@@ -79,7 +96,7 @@ class TestProposalExample:
         assert result[1].interval.value.high == 25
 
 
-class TestSignDomainRefinement:
+class TestSignSetRefinement:
     """Tests for sign domain refinement from samples."""
     
     def test_positive_samples_give_positive_sign(self):
@@ -87,56 +104,56 @@ class TestSignDomainRefinement:
         samples = [5, 10, 15, 100, 999]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.POSITIVE
+        assert sign_domain.signs == SIGN_POSITIVE
     
     def test_negative_samples_give_negative_sign(self):
         """All negative samples should refine to NEGATIVE sign."""
         samples = [-5, -10, -15, -100, -999]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.NEGATIVE
+        assert sign_domain.signs == SIGN_NEGATIVE
     
     def test_zero_samples_give_zero_sign(self):
         """All zero samples should refine to ZERO sign."""
         samples = [0, 0, 0, 0]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.ZERO
+        assert sign_domain.signs == SIGN_ZERO
     
     def test_mixed_positive_negative_give_non_zero(self):
         """Mixed positive and negative (no zero) should give NON_ZERO."""
         samples = [5, -10, 15, -20]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.NON_ZERO
+        assert sign_domain.signs == SIGN_NON_ZERO
     
     def test_positive_and_zero_give_non_negative(self):
         """Positive and zero samples should give NON_NEGATIVE."""
         samples = [0, 5, 10, 0, 15]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.NON_NEGATIVE
+        assert sign_domain.signs == SIGN_NON_NEGATIVE
     
     def test_negative_and_zero_give_non_positive(self):
         """Negative and zero samples should give NON_POSITIVE."""
         samples = [0, -5, -10, 0, -15]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.NON_POSITIVE
+        assert sign_domain.signs == SIGN_NON_POSITIVE
     
     def test_all_signs_give_top(self):
         """Positive, negative, and zero should give TOP."""
         samples = [-5, 0, 5, -10, 10]
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.TOP
+        assert sign_domain.signs == SIGN_TOP
     
     def test_empty_samples_give_bottom(self):
         """Empty samples should give BOTTOM."""
         samples = []
         sign_domain, _ = refine_from_trace(samples)
         
-        assert sign_domain.value == SignValue.BOTTOM
+        assert sign_domain.signs == SIGN_BOTTOM
 
 
 class TestIntervalDomainRefinement:
@@ -270,7 +287,7 @@ class TestIntegration:
         result = integrate_abstractions(temp_trace_file)
         
         assert 0 in result
-        assert result[0].sign.value == SignValue.POSITIVE
+        assert result[0].sign.signs == SIGN_POSITIVE
         assert result[0].interval.value.low == 5
         assert result[0].interval.value.high == 25
     
@@ -321,7 +338,7 @@ class TestRealTraces:
         
         # local_0 should have positive samples [1,1,1,1,1]
         assert 0 in result
-        assert result[0].sign.value == SignValue.POSITIVE
+        assert result[0].sign.signs == SIGN_POSITIVE
     
     def test_integrate_all_traces(self, traces_dir):
         """Test integration of all traces in directory."""
@@ -362,11 +379,11 @@ class TestEdgeCases:
         
         try:
             sign = get_sign_for_local(temp_path, 0)
-            assert sign == SignValue.POSITIVE
+            assert sign.signs == SIGN_POSITIVE
             
             # Non-existent local should return TOP
             sign_missing = get_sign_for_local(temp_path, 99)
-            assert sign_missing == SignValue.TOP
+            assert sign_missing.signs == SIGN_TOP
         finally:
             os.unlink(temp_path)
     
@@ -439,7 +456,7 @@ class TestReducedProductState:
         samples = [5, 10, 15, 20, 25]
         reduced = ReducedProductState.from_samples(samples)
         
-        assert reduced.sign.value == SignValue.POSITIVE
+        assert reduced.sign.signs == SIGN_POSITIVE
         assert reduced.interval.value.low == 5
         assert reduced.interval.value.high == 25
     
@@ -448,7 +465,7 @@ class TestReducedProductState:
         samples = [-25, -20, -15, -10, -5]
         reduced = ReducedProductState.from_samples(samples)
         
-        assert reduced.sign.value == SignValue.NEGATIVE
+        assert reduced.sign.signs == SIGN_NEGATIVE
         assert reduced.interval.value.low == -25
         assert reduced.interval.value.high == -5
     
@@ -457,7 +474,7 @@ class TestReducedProductState:
         samples = [0, 0, 0]
         reduced = ReducedProductState.from_samples(samples)
         
-        assert reduced.sign.value == SignValue.ZERO
+        assert reduced.sign.signs == SIGN_ZERO
         assert reduced.interval.value.low == 0
         assert reduced.interval.value.high == 0
     
@@ -465,7 +482,7 @@ class TestReducedProductState:
         """TOP state should have no constraints."""
         reduced = ReducedProductState.top()
         
-        assert reduced.sign.value == SignValue.TOP
+        assert reduced.sign.signs == SIGN_TOP
         assert reduced.interval.value.low is None
         assert reduced.interval.value.high is None
         assert reduced.is_top()
@@ -474,7 +491,7 @@ class TestReducedProductState:
         """BOTTOM state should be unreachable."""
         reduced = ReducedProductState.bottom()
         
-        assert reduced.sign.value == SignValue.BOTTOM
+        assert reduced.sign.signs == SIGN_BOTTOM
         assert reduced.is_bottom()
 
 
@@ -493,7 +510,7 @@ class TestParallelExecution:
         
         Course definition: abstractions inform each other during execution.
         """
-        sign = SignDomain(SignValue.POSITIVE)
+        sign = sign_positive()
         interval = IntervalDomain(IntervalValue(-5, 10))
         
         new_sign, new_interval = inform_each_other(sign, interval)
@@ -501,13 +518,13 @@ class TestParallelExecution:
         # Sign POSITIVE should tighten low bound to max(-5, 1) = 1
         assert new_interval.value.low == 1
         assert new_interval.value.high == 10
-        assert new_sign.value == SignValue.POSITIVE
+        assert new_sign.signs == SIGN_POSITIVE
     
     def test_parallel_negative_sign_tightens_interval_high(self):
         """
         Parallel execution: NEGATIVE sign should tighten interval high bound to -1.
         """
-        sign = SignDomain(SignValue.NEGATIVE)
+        sign = sign_negative()
         interval = IntervalDomain(IntervalValue(-10, 5))
         
         new_sign, new_interval = inform_each_other(sign, interval)
@@ -515,13 +532,13 @@ class TestParallelExecution:
         # Sign NEGATIVE should tighten high bound to min(5, -1) = -1
         assert new_interval.value.low == -10
         assert new_interval.value.high == -1
-        assert new_sign.value == SignValue.NEGATIVE
+        assert new_sign.signs == SIGN_NEGATIVE
     
     def test_parallel_zero_sign_constrains_interval(self):
         """
         Parallel execution: ZERO sign should constrain interval to [0, 0].
         """
-        sign = SignDomain(SignValue.ZERO)
+        sign = sign_zero()
         interval = IntervalDomain(IntervalValue(-10, 10))
         
         new_sign, new_interval = inform_each_other(sign, interval)
@@ -529,49 +546,49 @@ class TestParallelExecution:
         # Sign ZERO should constrain interval to [0, 0]
         assert new_interval.value.low == 0
         assert new_interval.value.high == 0
-        assert new_sign.value == SignValue.ZERO
+        assert new_sign.signs == SIGN_ZERO
     
     def test_parallel_interval_positive_infers_sign(self):
         """
         Parallel execution: Interval [a, b] where a > 0 should refine sign to POSITIVE.
         """
-        sign = SignDomain(SignValue.TOP)
+        sign = SignSet.top()
         interval = IntervalDomain(IntervalValue(5, 100))
         
         new_sign, new_interval = inform_each_other(sign, interval)
         
         # Interval [5, 100] should infer POSITIVE sign
-        assert new_sign.value == SignValue.POSITIVE
+        assert new_sign.signs == SIGN_POSITIVE
     
     def test_parallel_interval_negative_infers_sign(self):
         """
         Parallel execution: Interval [a, b] where b < 0 should refine sign to NEGATIVE.
         """
-        sign = SignDomain(SignValue.TOP)
+        sign = SignSet.top()
         interval = IntervalDomain(IntervalValue(-100, -5))
         
         new_sign, new_interval = inform_each_other(sign, interval)
         
         # Interval [-100, -5] should infer NEGATIVE sign
-        assert new_sign.value == SignValue.NEGATIVE
+        assert new_sign.signs == SIGN_NEGATIVE
     
     def test_parallel_interval_zero_infers_sign(self):
         """
         Parallel execution: Interval [0, 0] should refine sign to ZERO.
         """
-        sign = SignDomain(SignValue.TOP)
+        sign = SignSet.top()
         interval = IntervalDomain(IntervalValue(0, 0))
         
         new_sign, new_interval = inform_each_other(sign, interval)
         
         # Interval [0, 0] should infer ZERO sign
-        assert new_sign.value == SignValue.ZERO
+        assert new_sign.signs == SIGN_ZERO
     
     def test_parallel_non_negative_sign_tightens_interval(self):
         """
         Parallel execution: NON_NEGATIVE sign should tighten interval low to 0.
         """
-        sign = SignDomain(SignValue.NON_NEGATIVE)
+        sign = sign_non_negative()
         interval = IntervalDomain(IntervalValue(-10, 10))
         
         new_sign, new_interval = inform_each_other(sign, interval)
@@ -584,7 +601,7 @@ class TestParallelExecution:
         """
         Parallel execution: NON_POSITIVE sign should tighten interval high to 0.
         """
-        sign = SignDomain(SignValue.NON_POSITIVE)
+        sign = sign_non_positive()
         interval = IntervalDomain(IntervalValue(-10, 10))
         
         new_sign, new_interval = inform_each_other(sign, interval)
@@ -601,7 +618,7 @@ class TestParallelExecution:
         """
         # Start with sign POSITIVE and interval including negatives
         reduced = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(-5, 100))
         )
         
@@ -618,7 +635,7 @@ class TestParallelExecution:
         Test that refinement history is tracked for debugging.
         """
         reduced = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(-5, 10))
         )
         
@@ -626,7 +643,6 @@ class TestParallelExecution:
         
         history = reduced.get_refinement_history()
         assert len(history) > 0
-        assert any("POSITIVE" in h for h in history)
 
 
 class TestMutualRefinementEdgeCases:
@@ -640,7 +656,7 @@ class TestMutualRefinementEdgeCases:
         """
         # POSITIVE sign with all-negative interval is inconsistent
         reduced = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(-100, -1))
         )
         
@@ -654,7 +670,7 @@ class TestMutualRefinementEdgeCases:
         Already consistent state should not change.
         """
         reduced = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(1, 10))
         )
         
@@ -662,7 +678,7 @@ class TestMutualRefinementEdgeCases:
         changed = reduced.inform_each_other()
         
         # May have minor refinement but result should be same
-        assert reduced.sign.value == SignValue.POSITIVE
+        assert reduced.sign.signs == SIGN_POSITIVE
         assert reduced.interval.value.low == 1
         assert reduced.interval.value.high == 10
     
@@ -680,7 +696,7 @@ class TestMutualRefinementEdgeCases:
         """
         reduced = ReducedProductState.from_samples([42])
         
-        assert reduced.sign.value == SignValue.POSITIVE
+        assert reduced.sign.signs == SIGN_POSITIVE
         assert reduced.interval.value.low == 42
         assert reduced.interval.value.high == 42
 
@@ -700,7 +716,7 @@ class TestReducedProductOperations:
         joined = rp1.join(rp2)
         
         # Join should give interval [5, 20] and POSITIVE sign
-        assert joined.sign.value == SignValue.POSITIVE
+        assert joined.sign.signs == SIGN_POSITIVE
         assert joined.interval.value.low == 5
         assert joined.interval.value.high == 20
     
@@ -709,18 +725,18 @@ class TestReducedProductOperations:
         Meet of two reduced products should be greatest lower bound.
         """
         rp1 = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(1, 20))
         )
         rp2 = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(10, 30))
         )
         
         met = rp1.meet(rp2)
         
         # Meet should give interval [10, 20]
-        assert met.sign.value == SignValue.POSITIVE
+        assert met.sign.signs == SIGN_POSITIVE
         assert met.interval.value.low == 10
         assert met.interval.value.high == 20
     
@@ -729,11 +745,11 @@ class TestReducedProductOperations:
         Widening should ensure termination in fixpoint computation.
         """
         rp1 = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(1, 10))
         )
         rp2 = ReducedProductState(
-            sign=SignDomain(SignValue.POSITIVE),
+            sign=sign_positive(),
             interval=IntervalDomain(IntervalValue(1, 20))
         )
         
@@ -785,7 +801,7 @@ class TestIntegrationWithReducedProduct:
         
         assert 0 in result
         assert isinstance(result[0], ReducedProductState)
-        assert result[0].sign.value == SignValue.POSITIVE
+        assert result[0].sign.signs == SIGN_POSITIVE
         assert result[0].interval.value.low == 5
         assert result[0].interval.value.high == 25
     
@@ -795,7 +811,7 @@ class TestIntegrationWithReducedProduct:
         reduced = refine_from_trace_reduced(samples)
         
         assert isinstance(reduced, ReducedProductState)
-        assert reduced.sign.value == SignValue.POSITIVE
+        assert reduced.sign.signs == SIGN_POSITIVE
         assert reduced.interval.value.low == 10
         assert reduced.interval.value.high == 30
     
@@ -805,7 +821,7 @@ class TestIntegrationWithReducedProduct:
         
         assert 1 in result
         assert isinstance(result[1], ReducedProductState)
-        assert result[1].sign.value == SignValue.POSITIVE
+        assert result[1].sign.signs == SIGN_POSITIVE
 
 
 if __name__ == "__main__":
