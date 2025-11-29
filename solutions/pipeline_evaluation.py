@@ -37,7 +37,7 @@ from jpamb.model import Suite
 from solutions.components.abstract_domain import SignSet, IntervalDomain, NonNullDomain
 from solutions.components.bytecode_analysis import BytecodeAnalyzer, CFG
 from solutions.nab_integration import ReducedProductState
-from solutions.components.abstract_interpreter import unbounded_abstract_run, product_unbounded_run, ProductValue
+from solutions.components.abstract_interpreter import product_unbounded_run, ProductValue
 from solutions.code_rewriter import CodeRewriter
 
 
