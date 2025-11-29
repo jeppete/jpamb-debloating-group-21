@@ -5,8 +5,8 @@ from jpamb import jvm
 
 # Import the new classes from the interpreter
 import sys
-sys.path.append(str(Path(__file__).parent.parent / "solutions"))
-from interpreter import TraceRefiner, AbstractDomain, AbstractState, RefinementResult
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from solutions.interpreter import TraceRefiner, AbstractDomain, AbstractState, RefinementResult  # noqa: E402
 
 
 class TestTraceRefiner:

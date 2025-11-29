@@ -4,10 +4,10 @@ import sys
 from pathlib import Path
 import tempfile
 
-# Add solutions to path so we can import interpreter
-sys.path.insert(0, str(Path(__file__).parent.parent / "solutions"))
+# Add project root to path so we can import from solutions
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from interpreter import execute, CoverageTracker, ValueTracer
+from solutions.interpreter import execute, CoverageTracker, ValueTracer  # noqa: E402
 import jpamb
 from jpamb import jvm
 
