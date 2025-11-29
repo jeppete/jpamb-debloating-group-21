@@ -776,7 +776,7 @@ def generate_traces(trace_dir: Path = Path("traces"), verbose: bool = True, clea
     Args:
         trace_dir: Directory to write traces to
         verbose: Show detailed output
-        clean: If True, remove stale trace files for classes that no longer exist
+        clean: If True, remove ALL existing trace files before regenerating
     
     Returns:
         True if trace generation succeeded
@@ -786,11 +786,23 @@ def generate_traces(trace_dir: Path = Path("traces"), verbose: bool = True, clea
         print("STEP 0: IIN - Generate Execution Traces for ALL Methods")
         print("=" * 80)
     
-    # Clean stale traces first
+    # Clean ALL trace files before regenerating to ensure fresh data
     if clean and trace_dir.exists():
-        stale_count = _clean_stale_traces(trace_dir, verbose)
-        if verbose and stale_count > 0:
-            print(f"\nCleaned {stale_count} stale trace files")
+        existing_traces = list(trace_dir.glob("*.json"))
+        if existing_traces:
+            if verbose:
+                print(f"\nClearing {len(existing_traces)} existing trace files...")
+            for trace_file in existing_traces:
+                trace_file.unlink()
+            if verbose:
+                print(f"✓ Cleared all trace files from {trace_dir}/")
+    
+    # Also clear initial_states.json if it exists
+    states_file = Path("initial_states.json")
+    if clean and states_file.exists():
+        states_file.unlink()
+        if verbose:
+            print(f"✓ Cleared {states_file}")
     
     if verbose:
         print(f"\nRunning: uv run jpamb trace --trace-dir {trace_dir}")
@@ -817,6 +829,31 @@ def generate_traces(trace_dir: Path = Path("traces"), verbose: bool = True, clea
     trace_files = list(trace_dir.glob("*.json"))
     if verbose:
         print(f"\n✓ Generated {len(trace_files)} trace files in {trace_dir}/")
+    
+    # Generate initial_states.json using jpamb refine
+    # This consolidates trace info into a single file for consistency
+    states_file = Path("initial_states.json")
+    if verbose:
+        print(f"\nRunning: uv run jpamb refine --trace-dir {trace_dir} --output {states_file}")
+    
+    refine_result = subprocess.run(
+        ["uv", "run", "jpamb", "refine", "--trace-dir", str(trace_dir), "--output", str(states_file)],
+        capture_output=True,
+        text=True
+    )
+    
+    if verbose:
+        if refine_result.stdout:
+            print(refine_result.stdout)
+        if refine_result.stderr:
+            print(refine_result.stderr)
+    
+    if refine_result.returncode != 0:
+        if verbose:
+            print(f"\n⚠ Refine step failed with code {refine_result.returncode}")
+        # Don't fail the whole pipeline, traces are still usable
+    elif verbose:
+        print(f"✓ Generated {states_file}")
     
     return True
 
