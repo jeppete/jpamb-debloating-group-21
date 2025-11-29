@@ -37,7 +37,7 @@ from jpamb.model import Suite
 from solutions.components.abstract_domain import SignSet, IntervalDomain, NonNullDomain
 from solutions.components.bytecode_analysis import BytecodeAnalyzer, CFG
 from solutions.nab_integration import ReducedProductState
-from solutions.components.abstract_interpreter import unbounded_abstract_run
+from solutions.components.abstract_interpreter import unbounded_abstract_run, product_unbounded_run, ProductValue
 from solutions.code_rewriter import CodeRewriter
 
 
@@ -476,7 +476,8 @@ def step_iai(
     - IBA (Implement Unbounded Analysis): 7 points - IntervalDomain + widening  
     - NAB (Integrate Abstractions): 5 points per domain - Reduced product
     
-    Uses SignArithmetic and IntervalArithmetic internally for all operations.
+    Uses ProductValue (Interval + Nullness) for maximum precision.
+    The interval info comes from NAN's dynamic trace abstraction.
     """
     if verbose:
         print("\n" + "=" * 80)
@@ -489,21 +490,26 @@ def step_iai(
     
     method = jvm.AbsMethodID.decode(isy_result.method_id)
     
-    # Create initial locals from NAN results (use SignSet for abstract interpreter)
-    init_locals = {}
+    # Create ProductValue initial locals from NAN results
+    # This uses the INTERVAL info from dynamic traces for better precision
+    product_init_locals = {}
     for idx, state in nan_result.initial_states.items():
-        init_locals[idx] = state.sign
+        # Convert ReducedProductState to ProductValue
+        product_init_locals[idx] = ProductValue(
+            interval=state.interval,
+            nullness=state.nonnull
+        )
     
     if verbose:
-        print("\nInitial Abstract State:")
-        for idx, sign in init_locals.items():
-            print(f"  local_{idx} = {sign}")
+        print("\nInitial Abstract State (from dynamic traces):")
+        for idx, pv in product_init_locals.items():
+            print(f"  local_{idx} = {pv}")
     
-    # Run abstract interpreter with unbounded analysis
+    # Run product domain abstract interpreter (uses interval + nullness)
     if verbose:
-        print("\nRunning unbounded_abstract_run()...")
+        print("\nRunning product_unbounded_run() with dynamic trace refinement...")
     
-    outcomes, visited = unbounded_abstract_run(suite, method, init_locals)
+    outcomes, visited = product_unbounded_run(suite, method, product_init_locals)
     
     # Compute unreachable PCs
     unreachable = isy_result.all_offsets - visited
