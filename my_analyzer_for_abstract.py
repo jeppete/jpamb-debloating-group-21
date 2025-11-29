@@ -6,7 +6,7 @@ import sys
 import jpamb
 from jpamb import jvm
 
-from solutions.abstract_interpreter import AbstractInterpreter
+from solutions.components.abstract_interpreter import AbstractInterpreter
 
 
 def find_method(suite: jpamb.Suite, method_str: str) -> jvm.AbsMethodID:

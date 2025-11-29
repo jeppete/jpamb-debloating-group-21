@@ -12,10 +12,9 @@ This script provides a complete pipeline that connects ALL features:
 - NCR: Dead code removal via NOP replacement
 
 Usage:
-    python solutions/pipeline_evaluation.py                          # Run on ALL methods (uses existing traces)
+    python solutions/pipeline_evaluation.py                          # Run on ALL methods (always regenerates traces)
     python solutions/pipeline_evaluation.py Simple.assertPositive    # Run on specific method
     python solutions/pipeline_evaluation.py --all                    # Run on ALL methods
-    python solutions/pipeline_evaluation.py --regenerate             # Regenerate traces before analysis
     python solutions/pipeline_evaluation.py --clean                  # Clean stale traces (for deleted classes)
     python solutions/pipeline_evaluation.py --list                   # List available methods
 
@@ -35,9 +34,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from jpamb import jvm
 from jpamb.model import Suite
-from solutions.abstract_domain import SignSet, IntervalDomain, NonNullDomain
+from solutions.components.abstract_domain import SignSet, IntervalDomain, NonNullDomain
+from solutions.components.bytecode_analysis import BytecodeAnalyzer, CFG
 from solutions.nab_integration import ReducedProductState
-from solutions.abstract_interpreter import unbounded_abstract_run
+from solutions.components.abstract_interpreter import unbounded_abstract_run
 from solutions.code_rewriter import CodeRewriter
 
 
@@ -53,7 +53,7 @@ class ISYResult:
     method_name: str
     bytecode: List[dict]
     instruction_count: int
-    cfg_edges: List[Tuple[int, int]]
+    cfg: CFG  # CFG from BytecodeAnalyzer
     all_offsets: Set[int]
     # Line number table: offset -> line number
     line_table: Dict[int, int] = None
@@ -125,11 +125,11 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
     ISY (Interpret Syntactic Information) - 6 points
     
     Parse bytecode into structured format with CFG information.
-    Uses the Suite to load method bytecode directly.
+    Uses BytecodeAnalyzer for consistent analysis with debloater.
     """
     if verbose:
         print("=" * 80)
-        print("STEP 0: ISY - Parse Bytecode → CFG + Statements")
+        print("STEP 0: ISY - Parse Bytecode → CFG + Statements (using BytecodeAnalyzer)")
         print("=" * 80)
     
     # Parse method ID
@@ -156,29 +156,19 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
     if not method_data:
         raise ValueError(f"Method {method_name} not found in {class_name}")
     
-    bytecode = method_data.get('code', {}).get('bytecode', [])
+    code = method_data.get('code', {})
+    bytecode = code.get('bytecode', [])
     
-    # Extract CFG edges and offsets
-    cfg_edges = []
-    all_offsets = set()
+    # Use BytecodeAnalyzer to build CFG (same as debloater)
+    analyzer = BytecodeAnalyzer(suite)
+    full_method_name = f"{method.classname}.{method_name}"
+    cfg = analyzer.build_cfg(full_method_name, code)
     
-    for bc in bytecode:
-        offset = bc.get('offset', 0)
-        all_offsets.add(offset)
-        opr = bc.get('opr', '')
-        
-        # Branch instructions create CFG edges
-        if opr in ('ifz', 'if', 'goto'):
-            target = bc.get('target', 0)
-            cfg_edges.append((offset, target))
-        elif opr == 'tableswitch' or opr == 'lookupswitch':
-            for target in bc.get('targets', []):
-                cfg_edges.append((offset, target))
-            if 'default' in bc:
-                cfg_edges.append((offset, bc['default']))
+    # Get all offsets from CFG nodes
+    all_offsets = set(cfg.nodes.keys())
     
     # Build line number table (offset -> line number)
-    line_entries = method_data.get('code', {}).get('lines', [])
+    line_entries = code.get('lines', [])
     line_table = _build_line_table(line_entries, all_offsets)
     all_statements = set(line_table.values()) if line_table else set()
     
@@ -188,7 +178,7 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
         print(f"  Method: {method_name}")
         print(f"  Instructions: {len(bytecode)}")
         print(f"  Statements: {len(all_statements)}")
-        print(f"  CFG Edges: {len(cfg_edges)}")
+        print(f"  CFG Nodes: {len(cfg.nodes)}")
         
         print(f"\nBytecode ({len(bytecode)} instructions):")
         print("-" * 60)
@@ -205,7 +195,7 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
         method_name=method_name,
         bytecode=bytecode,
         instruction_count=len(bytecode),
-        cfg_edges=cfg_edges,
+        cfg=cfg,
         all_offsets=all_offsets,
         line_table=line_table,
         all_statements=all_statements
@@ -873,66 +863,76 @@ def _clean_stale_traces(trace_dir: Path, verbose: bool = False) -> int:
     return stale_count
 
 
-def run_pipeline_all(verbose: bool = False, regenerate_traces: bool = True) -> List[PipelineResult]:
+def run_pipeline_all(verbose: bool = False) -> List[PipelineResult]:
     """
-    Run the pipeline on ALL JPAMB methods.
+    Run the pipeline on ALL JPAMB methods from decompiled JSON files.
+    
+    This analyzes ALL methods comprehensively, including those without traces.
+    Methods without traces are analyzed using static-only analysis.
+    
+    Always regenerates traces before analysis to ensure fresh data.
     
     Args:
         verbose: Show detailed output for each method
-        regenerate_traces: If True, regenerate traces before analysis
     
     Returns:
         List of PipelineResult for each method
     """
     print("╔" + "═" * 78 + "╗")
     print("║" + " COMPLETE FINE-GRAINED DEBLOATING PIPELINE".center(78) + "║")
-    print("║" + " Running on ALL JPAMB Methods".center(78) + "║")
+    print("║" + " Running on ALL JPAMB Methods (Comprehensive)".center(78) + "║")
     print("╚" + "═" * 78 + "╝")
     
     traces_dir = Path("traces")
     
-    # Step 0: Generate traces for ALL methods
-    if regenerate_traces or not traces_dir.exists() or not list(traces_dir.glob("*.json")):
-        print("\n" + "─" * 80)
-        print("PHASE 1: Generate Execution Traces (IIN)")
-        print("─" * 80)
-        if not generate_traces(traces_dir, verbose=True):
-            print("Failed to generate traces")
-            return []
-    else:
-        print(f"\nUsing existing traces in {traces_dir}/")
-        print("  (Use --regenerate to regenerate traces)")
-    
+    # Step 0: Always generate traces for ALL methods
     print("\n" + "─" * 80)
-    print("PHASE 2: Analyze All Methods (ISY → NAN → IAI → NCR)")
+    print("PHASE 1: Generate Execution Traces (IIN)")
     print("─" * 80)
-    
-    # Find all trace files
-    if not traces_dir.exists():
-        print("No traces directory found")
+    if not generate_traces(traces_dir, verbose=True):
+        print("Failed to generate traces")
         return []
     
+    print("\n" + "─" * 80)
+    print("PHASE 2: Enumerate ALL Methods from Decompiled JSON")
+    print("─" * 80)
+    
+    # Get ALL methods from decompiled JSON files (comprehensive)
+    all_methods = list_all_methods_from_decompiled()
+    
+    # Also get methods with traces for comparison
+    traced_methods = set(list_available_methods())
+    
+    print(f"\nTotal methods from decompiled JSON: {len(all_methods)}")
+    print(f"Methods with execution traces: {len(traced_methods)}")
+    print(f"Methods for static-only analysis: {len(all_methods) - len(traced_methods)}")
+    
+    print("\n" + "─" * 80)
+    print("PHASE 3: Analyze All Methods (ISY → NAN → IAI → NCR)")
+    print("─" * 80)
+    
     results = []
-    trace_files = sorted(traces_dir.glob("*.json"))
     
-    print(f"\nFound {len(trace_files)} trace files\n")
+    print(f"\nAnalyzing {len(all_methods)} methods...\n")
     
-    for trace_file in trace_files:
-        method_id = _trace_to_method_id(trace_file.stem)
-        if method_id:
-            print(f"Processing: {method_id}")
-            result = run_pipeline(method_id, verbose=verbose)
-            results.append(result)
-            
-            # Brief summary
-            if result.error:
-                print(f"  ✗ Error: {result.error[:50]}...")
-            elif result.iai:
-                stmt_info = ""
-                if result.iai.dead_statement_count > 0:
-                    stmt_info = f", {result.iai.dead_statement_count} statements"
-                print(f"  ✓ Dead code: {result.iai.dead_code_count} instructions{stmt_info}")
-            print()
+    for method_id in all_methods:
+        has_trace = method_id in traced_methods
+        trace_marker = "✓" if has_trace else "○"
+        print(f"[{trace_marker}] Processing: {method_id}")
+        
+        result = run_pipeline(method_id, verbose=verbose)
+        results.append(result)
+        
+        # Brief summary
+        if result.error:
+            print(f"    ✗ Error: {result.error[:50]}...")
+        elif result.iai:
+            stmt_info = ""
+            if result.iai.dead_statement_count > 0:
+                stmt_info = f", {result.iai.dead_statement_count} statements"
+            trace_note = " (static-only)" if not has_trace else ""
+            print(f"    ✓ Dead code: {result.iai.dead_code_count} instructions{stmt_info}{trace_note}")
+        print()
     
     # Summary
     print("=" * 80)
@@ -943,7 +943,9 @@ def run_pipeline_all(verbose: bool = False, regenerate_traces: bool = True) -> L
     failed = [r for r in results if r.error is not None]
     dead_code_found = [r for r in success if r.iai and r.iai.dead_code_count > 0]
     
-    print(f"\nTotal methods: {len(results)}")
+    print(f"\nTotal methods analyzed: {len(results)}")
+    print(f"  - With traces: {len(traced_methods)}")
+    print(f"  - Static-only: {len(results) - len(traced_methods)}")
     print(f"Successful: {len(success)}")
     print(f"Failed: {len(failed)}")
     print(f"Methods with dead code: {len(dead_code_found)}")
@@ -1038,20 +1040,88 @@ def list_available_methods() -> List[str]:
     return methods
 
 
+def list_all_methods_from_decompiled() -> List[str]:
+    """
+    List ALL methods from decompiled JSON files.
+    
+    This is comprehensive - includes all methods in all classes,
+    not just those with traces.
+    """
+    decompiled_dir = Path("target/decompiled/jpamb/cases")
+    if not decompiled_dir.exists():
+        return []
+    
+    def _type_to_descriptor(type_info) -> str:
+        """Convert JSON type info to JVM descriptor."""
+        if type_info is None:
+            return "V"
+        
+        if isinstance(type_info, dict):
+            # Handle wrapped type: {'annotations': [], 'type': {...}} or {'annotations': [], 'type': None}
+            if 'type' in type_info and 'kind' not in type_info and 'base' not in type_info:
+                inner_type = type_info['type']
+                if inner_type is None:
+                    return "V"
+                type_info = inner_type
+            
+            if 'base' in type_info:
+                base = type_info['base']
+                base_map = {
+                    'int': 'I', 'long': 'J', 'float': 'F', 'double': 'D',
+                    'byte': 'B', 'char': 'C', 'short': 'S', 'boolean': 'Z', 'void': 'V'
+                }
+                return base_map.get(base, 'I')
+            elif 'kind' in type_info and type_info['kind'] == 'array':
+                # Array uses 'type' not 'inner' for the element type
+                inner = _type_to_descriptor(type_info.get('type'))
+                return '[' + inner
+            elif 'kind' in type_info and type_info['kind'] == 'class':
+                name = type_info.get('name', 'java/lang/Object')
+                return 'L' + name + ';'
+        
+        return 'I'  # Default to int
+    
+    def _build_descriptor(method) -> str:
+        """Build JVM method descriptor from params and returns."""
+        params = method.get('params', [])
+        returns = method.get('returns', None)
+        
+        param_desc = ""
+        for p in params:
+            param_desc += _type_to_descriptor(p)
+        
+        ret_desc = _type_to_descriptor(returns)
+        
+        return f"({param_desc}){ret_desc}"
+    
+    methods = []
+    for json_file in sorted(decompiled_dir.glob("*.json")):
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+            
+            class_name = "jpamb.cases." + json_file.stem
+            
+            for method in data.get('methods', []):
+                method_name = method.get('name')
+                
+                desc = _build_descriptor(method)
+                method_id = f"{class_name}.{method_name}:{desc}"
+                methods.append(method_id)
+        except Exception:
+            pass
+    
+    return methods
+
+
 # =============================================================================
 # Main Entry Point
 # =============================================================================
 
 def main():
     """Main entry point with command-line argument handling."""
-    regenerate = False
     clean_only = False
     args = sys.argv[1:]
-    
-    # Check for --regenerate flag
-    if "--regenerate" in args:
-        regenerate = True
-        args.remove("--regenerate")
     
     # Check for --clean flag
     if "--clean" in args:
@@ -1072,13 +1142,23 @@ def main():
         arg = args[0]
         
         if arg == "--list":
-            print("Available methods with traces:")
-            for m in list_available_methods():
-                print(f"  {m}")
+            traced_methods = set(list_available_methods())
+            all_methods = list_all_methods_from_decompiled()
+            
+            print(f"All methods from decompiled JSON ({len(all_methods)} total):")
+            print(f"  [✓] = has trace, [○] = static-only analysis\n")
+            
+            for m in all_methods:
+                marker = "✓" if m in traced_methods else "○"
+                print(f"  [{marker}] {m}")
+            
+            print(f"\n  Total: {len(all_methods)} methods")
+            print(f"  With traces: {len(traced_methods)}")
+            print(f"  Static-only: {len(all_methods) - len(traced_methods)}")
             return
         
         elif arg == "--all":
-            run_pipeline_all(verbose=False, regenerate_traces=regenerate)
+            run_pipeline_all(verbose=False)
             return
         
         elif arg == "--help":
@@ -1090,8 +1170,8 @@ def main():
             if ":" in arg:
                 method_id = arg
             else:
-                # Partial match - find in traces
-                methods = list_available_methods()
+                # Partial match - find in ALL methods
+                methods = list_all_methods_from_decompiled()
                 matches = [m for m in methods if arg.lower() in m.lower()]
                 if len(matches) == 1:
                     method_id = matches[0]
@@ -1109,7 +1189,7 @@ def main():
             return
     
     # Default: run on ALL methods
-    run_pipeline_all(verbose=False, regenerate_traces=regenerate)
+    run_pipeline_all(verbose=False)
 
 
 if __name__ == "__main__":

@@ -24,11 +24,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from jpamb import jvm
 from jpamb.model import Suite
 
-from solutions.abstract_interpreter import (
+from solutions.components.abstract_interpreter import (
     unbounded_abstract_run,
     get_unreachable_pcs,
 )
-from solutions.abstract_domain import SignSet
+from solutions.components.abstract_domain import SignSet
 from solutions.nab_integration import (
     ReducedProductState,
     extract_samples_from_trace,

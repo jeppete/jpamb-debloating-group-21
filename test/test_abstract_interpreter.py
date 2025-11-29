@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from jpamb import jvm
 from jpamb.model import Suite
 
-from solutions.abstract_interpreter import (
+from solutions.components.abstract_interpreter import (
     bounded_abstract_run,
     unbounded_abstract_run,
     get_unreachable_pcs,
@@ -28,7 +28,7 @@ from solutions.abstract_interpreter import (
     signset_from_reduced,
     AbstractInterpreter,
 )
-from solutions.abstract_domain import SignSet
+from solutions.components.abstract_domain import SignSet
 
 
 class TestBoundedAbstractInterpretation:

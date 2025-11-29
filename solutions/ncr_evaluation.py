@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from jpamb import jvm
 from jpamb.model import Suite
-from solutions.abstract_interpreter import unbounded_abstract_run
+from solutions.components.abstract_interpreter import unbounded_abstract_run
 from solutions.code_rewriter import CodeRewriter
 
 

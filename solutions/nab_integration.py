@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 
 # Import from abstract_domain module
-from solutions.abstract_domain import (
+from solutions.components.abstract_domain import (
     SignSet,
     IntervalDomain,
     IntervalValue,

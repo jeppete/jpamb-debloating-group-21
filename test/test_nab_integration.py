@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import NAB integration module and NonNullDomain
-from solutions.abstract_domain import NonNullDomain
+from solutions.components.abstract_domain import NonNullDomain
 from solutions.nab_integration import (
     integrate_abstractions,
     integrate_abstractions_full,
@@ -50,7 +50,7 @@ from solutions.nab_integration import (
 )
 
 # Import abstract domains
-from solutions.abstract_domain import (
+from solutions.components.abstract_domain import (
     SignSet,
     IntervalDomain,
     IntervalValue,

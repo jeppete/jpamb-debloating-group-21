@@ -1041,19 +1041,19 @@ def plot(ctx, report, directory):
 
 
 @cli.command()
-@click.option("--regenerate", is_flag=True, help="Regenerate traces before analysis")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output for each method")
 @click.option("--method", "-m", default=None, help="Analyze specific method (partial match)")
 @click.option("--list", "list_methods", is_flag=True, help="List available methods")
 @click.pass_context
-def pipeline(ctx, regenerate, verbose, method, list_methods):
+def pipeline(ctx, verbose, method, list_methods):
     """Run the complete fine-grained debloating pipeline.
     
     This connects all features: IIN → ISY → NAN → IAI+IBA+NAB → NCR
     
+    Traces are always regenerated before analysis.
+    
     Examples:
         uv run jpamb pipeline                    # Run on all methods
-        uv run jpamb pipeline --regenerate      # Regenerate traces first
         uv run jpamb pipeline -m assertPositive # Run on specific method
         uv run jpamb pipeline --list            # List available methods
     """
@@ -1097,7 +1097,7 @@ def pipeline(ctx, regenerate, verbose, method, list_methods):
         
         run_pipeline(method_id, verbose=True)
     else:
-        run_pipeline_all(verbose=verbose, regenerate_traces=regenerate)
+        run_pipeline_all(verbose=verbose)
 
 
 if __name__ == "__main__":

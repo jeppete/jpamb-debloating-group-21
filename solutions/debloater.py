@@ -21,26 +21,27 @@ from pathlib import Path
 import jpamb
 from jpamb import jvm
 
+# Add project root and components directory to path for imports
+PROJECT_ROOT = Path(__file__).parent.parent
+SOLUTIONS_DIR = Path(__file__).parent
+COMPONENTS_DIR = Path(__file__).parent / "components"
+for p in [PROJECT_ROOT, SOLUTIONS_DIR, COMPONENTS_DIR]:
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
 # Import analysis modules (using relative imports from components dir)
-from components.bytecode_analysis import BytecodeAnalyzer, AnalysisResult as BytecodeResult
-from components.syntaxer import BloatFinder
-from components.syntaxer.utils import create_java_parser
+from solutions.components.bytecode_analysis import BytecodeAnalyzer, AnalysisResult as BytecodeResult
+from solutions.components.syntaxer import BloatFinder
+from solutions.components.syntaxer.utils import create_java_parser
 
 # Import abstract interpreter with all domains (using full path from project root)
-from components.abstract_interpreter import (
+from solutions.components.abstract_interpreter import (
     interval_unbounded_run,
     product_unbounded_run,
     Bytecode,
     ProductValue,
 )
-from components.abstract_domain import IntervalDomain, NonNullDomain
-
-
-# Add project root and components directory to path for imports
-PROJECT_ROOT = Path(__file__).parent.parent
-COMPONENTS_DIR = Path(__file__).parent / "components"
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+from solutions.components.abstract_domain import IntervalDomain, NonNullDomain
 
 
 log = logging.getLogger(__name__)

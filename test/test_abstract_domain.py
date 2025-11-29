@@ -17,7 +17,7 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from solutions.abstract_domain import (
+from solutions.components.abstract_domain import (
     SignSet,
     SignArithmetic,
     IntervalDomain,

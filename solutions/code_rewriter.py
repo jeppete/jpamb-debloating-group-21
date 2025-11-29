@@ -918,7 +918,7 @@ def get_unreachable_pcs_from_analysis(
     """
     # Try to use abstract interpreter
     try:
-        from solutions.abstract_interpreter import analyze_method_reachability
+        from solutions.components.abstract_interpreter import analyze_method_reachability
         return analyze_method_reachability(method_id)
     except ImportError:
         pass

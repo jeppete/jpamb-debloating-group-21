@@ -18,7 +18,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "solutions"))
 
-from solutions.abstract_domain import IntervalDomain, SignSet
+from solutions.components.abstract_domain import IntervalDomain, SignSet
 from solutions.nab_integration import ReducedProductState
 
 
@@ -195,7 +195,7 @@ class TestUnboundedTermination:
     
     def test_widening_threshold_parameter(self):
         """Verify widening_threshold parameter exists."""
-        from solutions.abstract_interpreter import unbounded_abstract_run
+        from solutions.components.abstract_interpreter import unbounded_abstract_run
         import inspect
         
         sig = inspect.signature(unbounded_abstract_run)
@@ -203,7 +203,7 @@ class TestUnboundedTermination:
     
     def test_enable_narrowing_parameter(self):
         """Verify enable_narrowing parameter exists."""
-        from solutions.abstract_interpreter import unbounded_abstract_run
+        from solutions.components.abstract_interpreter import unbounded_abstract_run
         import inspect
         
         sig = inspect.signature(unbounded_abstract_run)
@@ -211,7 +211,7 @@ class TestUnboundedTermination:
     
     def test_narrowing_iterations_parameter(self):
         """Verify narrowing_iterations parameter exists."""
-        from solutions.abstract_interpreter import unbounded_abstract_run
+        from solutions.components.abstract_interpreter import unbounded_abstract_run
         import inspect
         
         sig = inspect.signature(unbounded_abstract_run)
@@ -306,7 +306,7 @@ class TestIBADocumentation:
     
     def test_unbounded_abstract_run_has_iba_docstring(self):
         """unbounded_abstract_run has IBA documentation."""
-        from solutions.abstract_interpreter import unbounded_abstract_run
+        from solutions.components.abstract_interpreter import unbounded_abstract_run
         
         doc = unbounded_abstract_run.__doc__
         assert doc is not None
