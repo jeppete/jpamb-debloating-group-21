@@ -21,15 +21,27 @@ from pathlib import Path
 import jpamb
 from jpamb import jvm
 
-# Add components directory to path for imports
+# Add project root and components directory to path for imports
+PROJECT_ROOT = Path(__file__).parent.parent
 COMPONENTS_DIR = Path(__file__).parent / "components"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 if str(COMPONENTS_DIR) not in sys.path:
     sys.path.insert(0, str(COMPONENTS_DIR))
 
-# Import analysis modules
+# Import analysis modules (using relative imports from components dir)
 from bytecode_analysis import BytecodeAnalyzer, AnalysisResult as BytecodeResult
 from syntaxer import BloatFinder
 from syntaxer.utils import create_java_parser
+
+# Import abstract interpreter with all domains (using full path from project root)
+from solutions.components.abstract_interpreter import (
+    interval_unbounded_run,
+    product_unbounded_run,
+    Bytecode,
+    ProductValue,
+)
+from solutions.components.abstract_domain import IntervalDomain, NonNullDomain
 
 log = logging.getLogger(__name__)
 
@@ -90,9 +102,21 @@ class Debloater:
     Then combines results and presents to developer.
     """
     
-    def __init__(self, suite: jpamb.Suite):
+    def __init__(self, suite: jpamb.Suite, 
+                 enable_abstract_interpreter: bool = True,
+                 abstract_domain: str = "product"):
+        """
+        Initialize the debloater.
+        
+        Args:
+            suite: JPAMB Suite for bytecode access
+            enable_abstract_interpreter: If True, run Phase 2 abstract interpretation
+            abstract_domain: Which domain to use ("sign", "interval", "product")
+        """
         self.suite = suite
         self.results = {}
+        self.enable_abstract_interpreter = enable_abstract_interpreter
+        self.abstract_domain = abstract_domain
     
     def analyze_class(self, classname: jvm.ClassName, source_file: Optional[Path] = None,
                       verbose: bool = True):
@@ -343,7 +367,7 @@ class Debloater:
         Run multi-phase bytecode analysis with sequential optimization.
         
         Phase 1: Bytecode syntactic (CFG + call graph)
-        Phase 2: [Future] Abstract interpretation (optimized by Phase 1)
+        Phase 2: Abstract interpretation (optional, configurable domain)
         Phase 3: [Future] Data flow (optimized by Phase 1+2)
         
         Args:
@@ -359,23 +383,134 @@ class Debloater:
         try:
             result = bytecode_analyzer.analyze_class(classname)
             log.info("    → Found %d unreachable methods", len(result.unreachable_methods))
-            log.info("    → Found %d methods with dead instructions", 
+            log.info("    → Found %d methods with dead instructions (CFG)", 
                     len(result.dead_instructions))
         except Exception as e:
             log.error("  Bytecode analysis failed: %s", e)
             raise
         
-        # Phase 2: Abstract Interpretation (TODO)
-        # log.info("  Phase 2: Abstract Interpretation")
-        # pruned_cfgs = self.prune_dead_code(result.cfgs, result.dead_instructions)
-        # abstract_result = AbstractInterpreter().analyze(classname, pruned_cfgs)
-        # Merge abstract_result into result
+        # Phase 2: Abstract Interpretation (optional)
+        if self.enable_abstract_interpreter:
+            domain_names = {
+                "sign": "SignSet",
+                "interval": "IntervalDomain", 
+                "product": "ProductDomain (Interval + Nullness)"
+            }
+            domain_name = domain_names.get(self.abstract_domain, self.abstract_domain)
+            log.info(f"  Phase 2: Abstract Interpretation ({domain_name})")
+            
+            abstract_dead = self.run_abstract_interpretation(classname, result)
+            
+            # Merge abstract interpretation results into main result
+            phase2_new = 0
+            for method_name, dead_offsets in abstract_dead.items():
+                if method_name not in result.dead_instructions:
+                    result.dead_instructions[method_name] = set()
+                
+                # Add newly found dead instructions
+                new_dead = dead_offsets - result.dead_instructions[method_name]
+                phase2_new += len(new_dead)
+                result.dead_instructions[method_name] |= dead_offsets
+            
+            log.info("    → Abstract interpretation found %d additional dead instructions", phase2_new)
+            log.info("    → Total dead instructions: %d", result.get_dead_instruction_count())
+        else:
+            log.info("  Phase 2: Abstract Interpretation (DISABLED)")
         
         # Phase 3: Data Flow Analysis (TODO)
         # log.info("  Phase 3: Data Flow Analysis")
         # ...
         
         return result
+    
+    def run_abstract_interpretation(self, classname: jvm.ClassName, 
+                                    phase1_result: BytecodeResult) -> Dict[str, Set[int]]:
+        """
+        Run abstract interpretation on all methods to find dead code.
+        
+        Uses ProductDomain (IntervalDomain + NonNullDomain) for maximum precision:
+        - Dead branches from constant comparisons (if x > 10; if x < 5)
+        - Dead branches from value propagation (x = 15; if x < 10)
+        - Dead null checks after 'new' (obj = new X(); if (obj == null))
+        - Dead code after contradictory conditions
+        
+        Args:
+            classname: Class to analyze
+            phase1_result: Results from Phase 1 (CFG analysis)
+            
+        Returns:
+            Dict mapping method name to set of dead instruction offsets
+        """
+        dead_by_method: Dict[str, Set[int]] = {}
+        
+        try:
+            cls = self.suite.findclass(classname)
+            methods = cls.get("methods", [])
+            
+            for method_dict in methods:
+                method_name = method_dict.get("name", "<unknown>")
+                full_name = f"{classname}.{method_name}"
+                
+                # Skip already-known unreachable methods
+                if full_name in phase1_result.unreachable_methods:
+                    continue
+                
+                # Skip methods without code (abstract/native)
+                code = method_dict.get("code")
+                if not code:
+                    continue
+                
+                bytecode = code.get("bytecode", [])
+                if not bytecode:
+                    continue
+                
+                try:
+                    # Build method ID for abstract interpreter
+                    params = jvm.ParameterType.from_json(
+                        method_dict.get("params", []), annotated=True
+                    )
+                    returns_info = method_dict.get("returns", {})
+                    return_type_json = returns_info.get("type")
+                    if return_type_json is None:
+                        return_type = None
+                    else:
+                        return_type = jvm.Type.from_json(return_type_json)
+                    
+                    method_id = jvm.MethodID(
+                        name=method_name, 
+                        params=params, 
+                        return_type=return_type
+                    )
+                    abs_method = jvm.AbsMethodID(classname=classname, extension=method_id)
+                    
+                    # Run abstract interpretation with configured domain
+                    if self.abstract_domain == "product":
+                        outcomes, visited_pcs = product_unbounded_run(self.suite, abs_method)
+                    elif self.abstract_domain == "interval":
+                        outcomes, visited_pcs = interval_unbounded_run(self.suite, abs_method)
+                    else:  # "sign"
+                        from solutions.components.abstract_interpreter import unbounded_abstract_run
+                        outcomes, visited_pcs = unbounded_abstract_run(self.suite, abs_method)
+                    
+                    # Get all PCs in this method
+                    all_pcs = {inst.get("offset", -1) for inst in bytecode if inst.get("offset", -1) >= 0}
+                    
+                    # Find unreachable PCs
+                    unreachable_pcs = all_pcs - visited_pcs
+                    
+                    if unreachable_pcs:
+                        dead_by_method[full_name] = unreachable_pcs
+                        log.debug(f"    {method_name}: {len(unreachable_pcs)} dead instructions")
+                    
+                except Exception as e:
+                    # Log but continue - some methods may fail (e.g., unsupported opcodes)
+                    log.debug(f"    {method_name}: skipped ({e})")
+                    continue
+        
+        except Exception as e:
+            log.warning(f"  Abstract interpretation error: {e}")
+        
+        return dead_by_method
     
     def map_bytecode_to_source(self, classname: jvm.ClassName, 
                                bytecode_result: BytecodeResult) -> MappedBytecodeResult:

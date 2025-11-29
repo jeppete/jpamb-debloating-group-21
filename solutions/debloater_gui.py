@@ -90,6 +90,40 @@ class DebloaterGUI:
         ttk.Button(self.batch_frame, text="Browse Directory...", 
                   command=self.browse_directory).grid(row=0, column=2, padx=5)
         
+        # Analysis options
+        options_frame = ttk.LabelFrame(control_frame, text="Analysis Options", padding="5")
+        options_frame.grid(row=0, column=2, rowspan=2, padx=10, pady=5)
+        
+        # Abstract interpreter toggle
+        self.abstract_interp_var = tk.BooleanVar(value=True)
+        self.abstract_interp_cb = ttk.Checkbutton(
+            options_frame, 
+            text="🧠 Abstract Interpreter",
+            variable=self.abstract_interp_var,
+            command=self.on_abstract_toggle
+        )
+        self.abstract_interp_cb.pack(anchor=tk.W)
+        
+        # Domain selection (only visible when abstract interpreter is enabled)
+        self.domain_frame = ttk.Frame(options_frame)
+        self.domain_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(self.domain_frame, text="Domain:", font=("Arial", 8)).pack(side=tk.LEFT, padx=2)
+        self.domain_var = tk.StringVar(value="product")
+        self.domain_combo = ttk.Combobox(
+            self.domain_frame, 
+            textvariable=self.domain_var,
+            values=["sign", "interval", "product"],
+            state="readonly",
+            width=10
+        )
+        self.domain_combo.pack(side=tk.LEFT, padx=2)
+        
+        # Tooltip-style label
+        self.domain_info = ttk.Label(options_frame, text="Product = Interval + Nullness (most precise)", 
+                                    font=("Arial", 7), foreground="gray")
+        self.domain_info.pack(anchor=tk.W)
+        
         # Action buttons
         self.analyze_btn = ttk.Button(control_frame, text="🔍 Analyze", 
                                       command=self.run_analysis)
@@ -339,6 +373,18 @@ class DebloaterGUI:
             self.batch_frame.grid_remove()
             self.single_frame.grid(row=1, column=0, columnspan=3, sticky=tk.EW, pady=5)
     
+    def on_abstract_toggle(self):
+        """Handle abstract interpreter toggle."""
+        enabled = self.abstract_interp_var.get()
+        
+        # Enable/disable domain selection
+        if enabled:
+            self.domain_combo.config(state="readonly")
+            self.domain_info.config(foreground="gray")
+        else:
+            self.domain_combo.config(state="disabled")
+            self.domain_info.config(foreground="lightgray")
+    
     def log(self, message, level="INFO"):
         """Add a message to the log tab."""
         self.log_tab.insert(tk.END, f"[{level}] {message}\n")
@@ -552,8 +598,14 @@ class DebloaterGUI:
                 else:
                     self.log(f"Warning: Source file not found: {source_file}", "WARNING")
             
-            # Create debloater with custom logging
-            self.debloater = DebloaterWithGUILogging(self.suite, self)
+            # Create debloater with custom logging and settings
+            enable_abstract = self.abstract_interp_var.get()
+            domain = self.domain_var.get()
+            self.debloater = DebloaterWithGUILogging(
+                self.suite, self, 
+                enable_abstract_interpreter=enable_abstract,
+                abstract_domain=domain
+            )
             
             # Run analysis
             self.debloater.analyze_class(classname, source_file, verbose=False)
@@ -596,8 +648,14 @@ class DebloaterGUI:
             self.progress.start()
             self.update_status("Finding Java files...")
             
-            # Create batch debloater
-            batch_debloater = BatchDebloaterWithGUILogging(self.suite, self)
+            # Create batch debloater with settings
+            enable_abstract = self.abstract_interp_var.get()
+            domain = self.domain_var.get()
+            batch_debloater = BatchDebloaterWithGUILogging(
+                self.suite, self,
+                enable_abstract_interpreter=enable_abstract,
+                abstract_domain=domain
+            )
             
             self.log(f"Scanning directory: {directory}")
             files_to_analyze = batch_debloater.find_java_files(directory)
@@ -780,8 +838,8 @@ class DebloaterGUI:
 class DebloaterWithGUILogging(Debloater):
     """Debloater that logs to GUI instead of console."""
     
-    def __init__(self, suite, gui):
-        super().__init__(suite)
+    def __init__(self, suite, gui, enable_abstract_interpreter=True, abstract_domain="product"):
+        super().__init__(suite, enable_abstract_interpreter, abstract_domain)
         self.gui = gui
     
     def analyze_class(self, classname, source_file=None, verbose=False):
@@ -856,11 +914,15 @@ class DebloaterWithGUILogging(Debloater):
 class BatchDebloaterWithGUILogging(BatchDebloater):
     """Batch debloater that logs to GUI instead of console."""
     
-    def __init__(self, suite, gui):
+    def __init__(self, suite, gui, enable_abstract_interpreter=True, abstract_domain="product"):
         super().__init__(suite)
         self.gui = gui
         # Replace the internal debloater with GUI-logging version
-        self.debloater = DebloaterWithGUILogging(suite, gui)
+        self.debloater = DebloaterWithGUILogging(
+            suite, gui, 
+            enable_abstract_interpreter, 
+            abstract_domain
+        )
     
     def analyze_files(self, files, show_progress=True):
         """Override to add GUI logging and progress tracking."""
