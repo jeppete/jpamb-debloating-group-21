@@ -1643,84 +1643,174 @@ def interval_get_unreachable_pcs(
 
 
 # ===========================================================================
-# PRODUCT DOMAIN: Combines IntervalDomain + NonNullDomain for maximum precision
+# PRODUCT DOMAIN: Combines SignSet × IntervalDomain × NonNullDomain
 # ===========================================================================
-# This domain tracks both:
-# - Integer values with intervals (for numeric comparisons)
+# This domain tracks all three abstractions:
+# - Sign information (for sign-based dead code detection)
+# - Integer value ranges with intervals (for numeric comparisons)
 # - Reference nullness (for null checks)
+#
+# The reduced product uses mutual refinement:
+# - Sign {+} forces interval low bound >= 1
+# - Sign {-} forces interval high bound <= -1
+# - Sign {0} forces interval [0, 0]
+# - Interval [a,b] where a > 0 forces sign = {+}
+# - Interval [a,b] where b < 0 forces sign = {-}
 # ===========================================================================
 
 
 @dataclass(frozen=True)
 class ProductValue:
     """
-    Product domain value combining interval and nullness information.
+    Reduced product domain value: SignSet × IntervalDomain × NonNullDomain.
     
-    For integer values: uses interval, nullness is TOP
-    For references: uses nullness, interval is TOP
+    This implements the full three-domain reduced product as described in
+    the course (DTU 02242). The domains mutually refine each other via
+    the reduce() method.
+    
+    For integer values: uses sign + interval, nullness is TOP
+    For references: uses nullness, sign + interval are TOP
     """
+    sign: SignSet
     interval: IntervalDomain
     nullness: NonNullDomain
     
+    def __post_init__(self):
+        # Apply reduction on construction (via object.__setattr__ for frozen dataclass)
+        reduced = self._compute_reduction()
+        if reduced != (self.sign, self.interval, self.nullness):
+            object.__setattr__(self, 'sign', reduced[0])
+            object.__setattr__(self, 'interval', reduced[1])
+            object.__setattr__(self, 'nullness', reduced[2])
+    
+    def _compute_reduction(self) -> tuple:
+        """
+        Compute mutual refinement between sign and interval.
+        Returns (refined_sign, refined_interval, nullness).
+        """
+        sign = self.sign
+        interval = self.interval
+        nullness = self.nullness
+        
+        # If any component is bottom, the whole value is bottom
+        if sign.is_bottom() or interval.is_bottom() or nullness.is_bottom():
+            return (SignSet.bottom(), IntervalDomain.bottom(), NonNullDomain.bottom())
+        
+        # Refine interval from sign
+        if sign.signs == frozenset({'+'}) :
+            # Positive: low >= 1
+            if interval.value.low is None or interval.value.low < 1:
+                interval = IntervalDomain.range(1, interval.value.high)
+        elif sign.signs == frozenset({'-'}):
+            # Negative: high <= -1
+            if interval.value.high is None or interval.value.high > -1:
+                interval = IntervalDomain.range(interval.value.low, -1)
+        elif sign.signs == frozenset({'0'}):
+            # Zero: [0, 0]
+            interval = IntervalDomain.const(0)
+        elif sign.signs == frozenset({'+', '0'}):
+            # Non-negative: low >= 0
+            if interval.value.low is None or interval.value.low < 0:
+                interval = IntervalDomain.range(0, interval.value.high)
+        elif sign.signs == frozenset({'-', '0'}):
+            # Non-positive: high <= 0
+            if interval.value.high is None or interval.value.high > 0:
+                interval = IntervalDomain.range(interval.value.low, 0)
+        
+        # Refine sign from interval
+        low, high = interval.value.low, interval.value.high
+        if low is not None and low > 0:
+            # All values positive
+            sign = sign & SignSet(frozenset({'+'})) if '+' in sign.signs else SignSet.bottom()
+        elif high is not None and high < 0:
+            # All values negative
+            sign = sign & SignSet(frozenset({'-'})) if '-' in sign.signs else SignSet.bottom()
+        elif low == 0 and high == 0:
+            # Exactly zero
+            sign = sign & SignSet(frozenset({'0'})) if '0' in sign.signs else SignSet.bottom()
+        elif low is not None and low >= 0:
+            # Non-negative
+            sign = sign & SignSet(frozenset({'+', '0'}))
+        elif high is not None and high <= 0:
+            # Non-positive
+            sign = sign & SignSet(frozenset({'-', '0'}))
+        
+        # Check for inconsistency after refinement
+        if sign.is_bottom():
+            return (SignSet.bottom(), IntervalDomain.bottom(), NonNullDomain.bottom())
+        
+        return (sign, interval, nullness)
+    
     @classmethod
     def top(cls) -> "ProductValue":
-        return cls(IntervalDomain.top(), NonNullDomain.top())
+        return cls(SignSet.top(), IntervalDomain.top(), NonNullDomain.top())
     
     @classmethod
     def bottom(cls) -> "ProductValue":
-        return cls(IntervalDomain.bottom(), NonNullDomain.bottom())
+        return cls(SignSet.bottom(), IntervalDomain.bottom(), NonNullDomain.bottom())
     
     @classmethod
     def from_int_const(cls, n: int) -> "ProductValue":
-        return cls(IntervalDomain.const(n), NonNullDomain.top())
+        return cls(SignSet.const(n), IntervalDomain.const(n), NonNullDomain.top())
     
     @classmethod
     def from_new(cls) -> "ProductValue":
         """Value from 'new' instruction - definitely non-null."""
-        return cls(IntervalDomain.top(), NonNullDomain.definitely_non_null())
+        return cls(SignSet.top(), IntervalDomain.top(), NonNullDomain.definitely_non_null())
     
     @classmethod
     def from_null(cls) -> "ProductValue":
         """Value from null constant."""
-        return cls(IntervalDomain.top(), NonNullDomain.maybe_null())
+        return cls(SignSet.top(), IntervalDomain.top(), NonNullDomain.maybe_null())
     
     def is_bottom(self) -> bool:
-        return self.interval.is_bottom() or self.nullness.is_bottom()
+        return self.sign.is_bottom() or self.interval.is_bottom() or self.nullness.is_bottom()
     
     def is_top(self) -> bool:
-        return self.interval.is_top() and self.nullness.is_top()
+        return self.sign.is_top() and self.interval.is_top() and self.nullness.is_top()
     
     def __le__(self, other: "ProductValue") -> bool:
-        return self.interval <= other.interval and self.nullness <= other.nullness
+        return (self.sign <= other.sign and 
+                self.interval <= other.interval and 
+                self.nullness <= other.nullness)
     
     def __or__(self, other: "ProductValue") -> "ProductValue":
         return ProductValue(
+            self.sign | other.sign,
             self.interval | other.interval,
             self.nullness | other.nullness
         )
     
     def __and__(self, other: "ProductValue") -> "ProductValue":
         return ProductValue(
+            self.sign & other.sign,
             self.interval & other.interval,
             self.nullness & other.nullness
         )
     
     def widening(self, other: "ProductValue") -> "ProductValue":
+        # Widen sign: if signs grow, go to TOP
+        sign_widened = self.sign | other.sign
+        if other.sign.signs - self.sign.signs:
+            sign_widened = SignSet.top()
+        
         return ProductValue(
+            sign_widened,
             self.interval.widening(other.interval),
             self.nullness.widening(other.nullness)
         )
     
     def __repr__(self) -> str:
-        return f"({self.interval}, {self.nullness})"
+        return f"({self.sign}, {self.interval}, {self.nullness})"
 
 
 class ProductArithmetic:
-    """Arithmetic operations on ProductValue."""
+    """Arithmetic operations on ProductValue (SignSet × Interval × NonNull)."""
     
     @staticmethod
     def add(a: ProductValue, b: ProductValue) -> ProductValue:
         return ProductValue(
+            SignArithmetic.add(a.sign, b.sign),
             IntervalArithmetic.add(a.interval, b.interval),
             NonNullDomain.top()  # Result is integer, not reference
         )
@@ -1728,6 +1818,7 @@ class ProductArithmetic:
     @staticmethod
     def sub(a: ProductValue, b: ProductValue) -> ProductValue:
         return ProductValue(
+            SignArithmetic.sub(a.sign, b.sign),
             IntervalArithmetic.sub(a.interval, b.interval),
             NonNullDomain.top()
         )
@@ -1735,18 +1826,22 @@ class ProductArithmetic:
     @staticmethod
     def mul(a: ProductValue, b: ProductValue) -> ProductValue:
         return ProductValue(
+            SignArithmetic.mul(a.sign, b.sign),
             IntervalArithmetic.mul(a.interval, b.interval),
             NonNullDomain.top()
         )
     
     @staticmethod
     def div(a: ProductValue, b: ProductValue) -> Tuple[ProductValue, bool]:
-        res, dz = IntervalArithmetic.div(a.interval, b.interval)
-        return ProductValue(res, NonNullDomain.top()), dz
+        sign_res, sign_dz = SignArithmetic.div(a.sign, b.sign)
+        interval_res, interval_dz = IntervalArithmetic.div(a.interval, b.interval)
+        dz = sign_dz or interval_dz
+        return ProductValue(sign_res, interval_res, NonNullDomain.top()), dz
     
     @staticmethod
     def neg(a: ProductValue) -> ProductValue:
         return ProductValue(
+            SignArithmetic.neg(a.sign),
             IntervalArithmetic.neg(a.interval),
             NonNullDomain.top()
         )
@@ -2007,7 +2102,7 @@ def product_astep(
             if loaded_local is not None:
                 old_val = n_taken.locals.get(loaded_local, ProductValue.top())
                 refined_interval = _refine_zero_compare_interval(cond, old_val.interval, True)
-                n_taken.locals[loaded_local] = ProductValue(refined_interval, old_val.nullness)
+                n_taken.locals[loaded_local] = ProductValue(old_val.sign, refined_interval, old_val.nullness)
             
             yield n_taken.with_pc(PC(pc.method, target_offset))
 
@@ -2020,7 +2115,7 @@ def product_astep(
                 if loaded_local is not None:
                     old_val = n_fall.locals.get(loaded_local, ProductValue.top())
                     refined_interval = _refine_zero_compare_interval(cond, old_val.interval, False)
-                    n_fall.locals[loaded_local] = ProductValue(refined_interval, old_val.nullness)
+                    n_fall.locals[loaded_local] = ProductValue(old_val.sign, refined_interval, old_val.nullness)
                 
                 yield n_fall.with_pc(nxt)
         return
@@ -2046,7 +2141,7 @@ def product_astep(
             
             if loaded_local is not None:
                 old_val = n_taken.locals.get(loaded_local, ProductValue.top())
-                n_taken.locals[loaded_local] = ProductValue(old_val.interval, NonNullDomain.maybe_null())
+                n_taken.locals[loaded_local] = ProductValue(old_val.sign, old_val.interval, NonNullDomain.maybe_null())
             
             yield n_taken.with_pc(PC(pc.method, target_offset))
 
@@ -2058,7 +2153,7 @@ def product_astep(
                 
                 if loaded_local is not None:
                     old_val = n_fall.locals.get(loaded_local, ProductValue.top())
-                    n_fall.locals[loaded_local] = ProductValue(old_val.interval, NonNullDomain.definitely_non_null())
+                    n_fall.locals[loaded_local] = ProductValue(old_val.sign, old_val.interval, NonNullDomain.definitely_non_null())
                 
                 yield n_fall.with_pc(nxt)
         return
@@ -2094,7 +2189,7 @@ def product_astep(
             if loaded_local is not None and right_const is not None:
                 old_val = n_taken.locals.get(loaded_local, ProductValue.top())
                 refined = _refine_const_compare_interval(cond, old_val.interval, right_const, True)
-                n_taken.locals[loaded_local] = ProductValue(refined, old_val.nullness)
+                n_taken.locals[loaded_local] = ProductValue(old_val.sign, refined, old_val.nullness)
             
             yield n_taken.with_pc(PC(pc.method, target_offset))
 
@@ -2108,7 +2203,7 @@ def product_astep(
                 if loaded_local is not None and right_const is not None:
                     old_val = n_fall.locals.get(loaded_local, ProductValue.top())
                     refined = _refine_const_compare_interval(cond, old_val.interval, right_const, False)
-                    n_fall.locals[loaded_local] = ProductValue(refined, old_val.nullness)
+                    n_fall.locals[loaded_local] = ProductValue(old_val.sign, refined, old_val.nullness)
                 
                 yield n_fall.with_pc(nxt)
         return
@@ -2246,8 +2341,8 @@ def product_astep(
             if not arr.nullness.is_definitely_non_null():
                 yield "null pointer"
                 yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
-        # Length is >= 0
-        n.stack.push(ProductValue(IntervalDomain.range(0, None), NonNullDomain.top()))
+        # Length is >= 0, sign is non-negative {+, 0}
+        n.stack.push(ProductValue(SignSet(frozenset({'+', '0'})), IntervalDomain.range(0, None), NonNullDomain.top()))
         nxt = bc.next_pc(pc)
         if nxt is not None:
             yield n.with_pc(nxt)

@@ -521,6 +521,9 @@ def step_iai(
         # rp.sign is a SignSet, access .signs to get the frozenset
         signs = rp.sign.signs if hasattr(rp.sign, 'signs') else set()
         
+        # Get the sign from the reduced product state
+        sign = rp.sign if hasattr(rp, 'sign') else SignSet.top()
+        
         # Determine sound interval bounds based on observed signs
         if signs == {'+'}:
             # Only positive observed → sound for all positive
@@ -544,7 +547,9 @@ def step_iai(
             # Unknown or empty → use TOP for soundness
             interval = IntervalDomain.top()
         
+        # Create ProductValue with all three components: Sign × Interval × NonNull
         product_init_locals[idx] = ProductValue(
+            sign=sign,
             interval=interval,
             nullness=NonNullDomain.top()  # Default to TOP for nullness
         )
