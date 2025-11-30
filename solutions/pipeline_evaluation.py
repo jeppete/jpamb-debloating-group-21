@@ -37,7 +37,7 @@ from jpamb.model import Suite
 from solutions.components.abstract_domain import SignSet, IntervalDomain, NonNullDomain
 from solutions.components.bytecode_analysis import BytecodeAnalyzer, CFG
 from solutions.nab_integration import ReducedProductState
-from solutions.components.abstract_interpreter import product_unbounded_run, ProductValue
+from solutions.components.abstract_interpreter import product_unbounded_run, ProductValue, ExceptionHandlerInfo
 from solutions.code_rewriter import CodeRewriter
 
 
@@ -59,6 +59,8 @@ class ISYResult:
     line_table: Dict[int, int] = None
     # All unique statement line numbers
     all_statements: Set[int] = None
+    # Exception handlers: list of {start, end, handler, catchType}
+    exception_handlers: List[dict] = None
 
 
 @dataclass
@@ -172,6 +174,9 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
     line_table = _build_line_table(line_entries, all_offsets)
     all_statements = set(line_table.values()) if line_table else set()
     
+    # Extract exception handlers
+    exception_handlers = code.get('exceptions', [])
+    
     if verbose:
         print(f"\nMethod: {method_id}")
         print(f"  Class: {class_name}")
@@ -179,6 +184,8 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
         print(f"  Instructions: {len(bytecode)}")
         print(f"  Statements: {len(all_statements)}")
         print(f"  CFG Nodes: {len(cfg.nodes)}")
+        if exception_handlers:
+            print(f"  Exception Handlers: {len(exception_handlers)}")
         
         print(f"\nBytecode ({len(bytecode)} instructions):")
         print("-" * 60)
@@ -198,7 +205,8 @@ def step_isy(method_id: str, suite: Suite, verbose: bool = True) -> ISYResult:
         cfg=cfg,
         all_offsets=all_offsets,
         line_table=line_table,
-        all_statements=all_statements
+        all_statements=all_statements,
+        exception_handlers=exception_handlers
     )
 
 
@@ -490,29 +498,97 @@ def step_iai(
     
     method = jvm.AbsMethodID.decode(isy_result.method_id)
     
-    # Create ProductValue initial locals from NAN results
-    # This uses the INTERVAL info from dynamic traces for better precision
+    # SOUNDNESS STRATEGY:
+    # Use trace data to guide the abstraction, but WIDEN to be sound.
+    # 
+    # The trace tells us what signs/ranges were observed. We widen these
+    # to include ALL values that could have the same sign behavior:
+    # - If trace shows {+} → widen to [1, +∞] (all positive)
+    # - If trace shows {-} → widen to [-∞, -1] (all negative)
+    # - If trace shows {0} → keep [0, 0]
+    # - If trace shows {+, 0} → widen to [0, +∞] (non-negative)
+    # - If trace shows {-, 0} → widen to [-∞, 0] (non-positive)
+    # - If trace shows {+, -, 0} → use TOP [-∞, +∞]
+    #
+    # This is SOUND because:
+    # - We over-approximate all possible inputs with the observed signs
+    # - The abstract interpreter explores all branches reachable from these
+    # - If a PC is not visited, it's unreachable for ALL inputs with these signs
+    
     product_init_locals = {}
-    for idx, state in nan_result.initial_states.items():
-        # Convert ReducedProductState to ProductValue
+    for idx, rp in nan_result.initial_states.items():
+        # Widen trace interval based on sign to be sound
+        # rp.sign is a SignSet, access .signs to get the frozenset
+        signs = rp.sign.signs if hasattr(rp.sign, 'signs') else set()
+        
+        # Determine sound interval bounds based on observed signs
+        if signs == {'+'}:
+            # Only positive observed → sound for all positive
+            interval = IntervalDomain.range(1, None)  # [1, +∞]
+        elif signs == {'-'}:
+            # Only negative observed → sound for all negative
+            interval = IntervalDomain.range(None, -1)  # [-∞, -1]
+        elif signs == {'0'}:
+            # Only zero observed → keep exact
+            interval = IntervalDomain.const(0)  # [0, 0]
+        elif signs == {'+', '0'}:
+            # Non-negative observed → sound for all non-negative
+            interval = IntervalDomain.range(0, None)  # [0, +∞]
+        elif signs == {'-', '0'}:
+            # Non-positive observed → sound for all non-positive
+            interval = IntervalDomain.range(None, 0)  # [-∞, 0]
+        elif signs == {'+', '-'} or signs == {'+', '-', '0'}:
+            # Mixed signs → use TOP for soundness
+            interval = IntervalDomain.top()  # [-∞, +∞]
+        else:
+            # Unknown or empty → use TOP for soundness
+            interval = IntervalDomain.top()
+        
         product_init_locals[idx] = ProductValue(
-            interval=state.interval,
-            nullness=state.nonnull
+            interval=interval,
+            nullness=NonNullDomain.top()  # Default to TOP for nullness
         )
     
     if verbose:
-        print("\nInitial Abstract State (from dynamic traces):")
+        print("\nInitial Abstract State (trace-guided, widened for soundness):")
         for idx, pv in product_init_locals.items():
-            print(f"  local_{idx} = {pv}")
+            rp = nan_result.initial_states.get(idx)
+            sign_str = ','.join(sorted(rp.sign.signs)) if rp and hasattr(rp.sign, 'signs') else '?'
+            print(f"  local_{idx} = {pv}  (from trace signs: {{{sign_str}}})")
     
-    # Run product domain abstract interpreter (uses interval + nullness)
+    # Run product domain abstract interpreter
     if verbose:
-        print("\nRunning product_unbounded_run() with dynamic trace refinement...")
+        print("\nRunning product_unbounded_run() with trace-guided sound abstraction...")
     
-    outcomes, visited = product_unbounded_run(suite, method, product_init_locals)
+    # Convert exception handlers to ExceptionHandlerInfo for abstract interpreter
+    # This allows the abstract interpreter to model exceptional control flow
+    exception_handler_infos = []
+    if isy_result.exception_handlers:
+        for handler in isy_result.exception_handlers:
+            exception_handler_infos.append(ExceptionHandlerInfo(
+                start_index=handler.get('start', 0),
+                end_index=handler.get('end', 0),
+                handler_index=handler.get('handler', 0),
+                catch_type=handler.get('catchType')
+            ))
+        if verbose:
+            print(f"\n  Exception handlers: {len(exception_handler_infos)}")
     
-    # Compute unreachable PCs
-    unreachable = isy_result.all_offsets - visited
+    # With trace-guided sound initial states, the analysis finds code that is
+    # unreachable for ALL inputs matching the observed sign patterns.
+    # This is SOUND: if a PC is not visited, NO concrete execution with these
+    # signs can reach it.
+    outcomes, visited, all_pcs = product_unbounded_run(
+        suite, method, product_init_locals,
+        widening_threshold=3,  # Allow some iterations before widening
+        exception_handlers=exception_handler_infos,
+        debug=False  # Set to True for debugging
+    )
+    
+    # SOUND: Unreachable PCs from abstract interpreter
+    # The abstract interpreter is sound, so any PC not visited is truly dead.
+    # No additional filtering needed - we trust the abstract interpreter.
+    unreachable = all_pcs - visited
     
     # Compute dead statements
     # A statement is FULLY dead only if ALL its instructions are dead
@@ -545,13 +621,13 @@ def step_iai(
     if verbose:
         print("\nResults:")
         print(f"  Visited PCs: {sorted(visited)}")
-        print(f"  All PCs: {sorted(isy_result.all_offsets)}")
+        print(f"  All PCs: {sorted(all_pcs)}")
         print(f"  Unreachable PCs: {sorted(unreachable)}")
         print(f"  Outcomes: {outcomes}")
         
         if unreachable:
             print("\nDead Code Found:")
-            print(f"  Instructions: {len(unreachable)} dead / {len(isy_result.all_offsets)} total")
+            print(f"  Instructions: {len(unreachable)} dead / {len(all_pcs)} total")
             print(f"  Statements (fully dead): {len(fully_dead_statements)} / {total_statements} (lines: {sorted(fully_dead_statements)})")
             if partially_dead_statements:
                 print(f"  Statements (partially dead): {len(partially_dead_statements)} (lines: {sorted(partially_dead_statements)})")

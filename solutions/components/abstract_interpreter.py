@@ -1752,9 +1752,105 @@ class ProductArithmetic:
         )
 
 
+# --- Exception Handler Support for Sound Dead Code Analysis ---
+
+@dataclass
+class ExceptionHandlerInfo:
+    """Exception handler info for abstract interpretation."""
+    start_index: int  # Start of try block (instruction index)
+    end_index: int    # End of try block (instruction index, exclusive)
+    handler_index: int  # Handler target (instruction index)
+    catch_type: str | None  # Exception type or None for catch-all
+
+
+def _find_applicable_handlers(
+    bc: Bytecode,
+    pc: PC,
+    exception_handlers: list[ExceptionHandlerInfo] | None,
+    exception_types: set[str] | None = None
+) -> list[int]:
+    """
+    Find all exception handlers applicable to the given PC and exception types.
+    
+    Args:
+        bc: Bytecode helper
+        pc: Current program counter
+        exception_handlers: List of exception handlers
+        exception_types: Set of exception type names that can be thrown (e.g., {'NullPointerException'}).
+                        If None, all handlers in scope are returned.
+    
+    Returns list of handler byte offsets (not indices) that might catch
+    an exception thrown at this PC.
+    """
+    if not exception_handlers:
+        return []
+    
+    # Get the instruction index for this PC
+    bc._ensure(pc.method)
+    assert bc._idx is not None
+    idx_map = bc._idx.get(pc.method, {})
+    
+    # Reverse lookup: offset -> index
+    offset_to_index = {off: idx for off, idx in idx_map.items()}
+    current_index = offset_to_index.get(pc.offset)
+    
+    if current_index is None:
+        return []
+    
+    handler_offsets = []
+    for handler in exception_handlers:
+        # Check if current instruction is in this handler's try block
+        if handler.start_index <= current_index < handler.end_index:
+            # Check if this handler catches the exception type
+            if exception_types is not None and handler.catch_type is not None:
+                # Extract simple name from fully qualified name
+                # e.g., "java/lang/NullPointerException" -> "NullPointerException"
+                handler_simple_name = handler.catch_type.split('/')[-1]
+                if handler_simple_name not in exception_types:
+                    continue  # This handler doesn't catch our exception type
+            
+            # Convert handler index to offset
+            handler_offset = bc.index_to_offset(pc.method, handler.handler_index)
+            handler_offsets.append(handler_offset)
+    
+    return handler_offsets
+
+
+def _yield_to_exception_handlers(
+    bc: Bytecode,
+    frame: PerVarFrame[ProductValue],
+    exception_handlers: list[ExceptionHandlerInfo] | None,
+    exception_types: set[str] | None = None
+) -> Iterable[PerVarFrame[ProductValue]]:
+    """
+    Yield frames to applicable exception handlers for the given exception types.
+    
+    Args:
+        bc: Bytecode helper
+        frame: Current frame
+        exception_handlers: List of exception handlers
+        exception_types: Set of exception type names that can be thrown.
+                        If None, yields to all handlers in scope.
+    
+    When an exception is thrown:
+    - The operand stack is cleared
+    - The exception object is pushed onto the stack (non-null reference)
+    - Control transfers to the handler
+    """
+    handler_offsets = _find_applicable_handlers(bc, frame.pc, exception_handlers, exception_types)
+    
+    for handler_offset in handler_offsets:
+        # Exception handler receives: empty stack + exception object (non-null)
+        n = frame.copy()
+        n.stack = Stack.empty()
+        n.stack.push(ProductValue.from_new())  # Exception is definitely non-null
+        yield n.with_pc(PC(frame.pc.method, handler_offset))
+
+
 def product_astep(
     bc: Bytecode,
     frame: PerVarFrame[ProductValue],
+    exception_handlers: list[ExceptionHandlerInfo] | None = None,
 ) -> Iterable[PerVarFrame[ProductValue] | str]:
     """
     One abstract step using ProductValue (Interval + Nullness) for maximum precision.
@@ -1762,6 +1858,9 @@ def product_astep(
     Detects dead code from:
     - Numeric comparisons (via IntervalDomain)
     - Null checks (via NonNullDomain)
+    
+    With exception_handlers provided, also models exceptional control flow
+    to ensure exception handler code is marked as reachable.
     """
     pc = frame.pc
     try:
@@ -1870,12 +1969,16 @@ def product_astep(
             res, dz = ProductArithmetic.div(left, right)
             if dz:
                 yield "divide by zero"
+                # Division by zero throws ArithmeticException - go to handlers
+                yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'ArithmeticException'})
             if right.interval.value.low == 0 and right.interval.value.high == 0:
                 return
             n.stack.push(res)
         elif "rem" in kind:
             if 0 in right.interval:
                 yield "divide by zero"
+                # Remainder by zero throws ArithmeticException - go to handlers
+                yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'ArithmeticException'})
             if right.interval.value.low == 0 and right.interval.value.high == 0:
                 return
             n.stack.push(ProductValue.top())
@@ -2036,6 +2139,8 @@ def product_astep(
             # If receiver is definitely non-null, no NPE
             if not recv.nullness.is_definitely_non_null():
                 yield "null pointer"
+                # Exception path: control goes to exception handlers
+                yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
 
         n.stack.push(ProductValue.top())
 
@@ -2062,6 +2167,8 @@ def product_astep(
             # If receiver is definitely non-null, no NPE
             if not recv.nullness.is_definitely_non_null():
                 yield "null pointer"
+                # Exception path: control goes to exception handlers
+                yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
 
         nxt = bc.next_pc(pc)
         if nxt is not None:
@@ -2103,7 +2210,9 @@ def product_astep(
         
         if not arr.nullness.is_definitely_non_null():
             yield "null pointer"
+            yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
         yield "out of bounds"
+        yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'ArrayIndexOutOfBoundsException'})
         
         n.stack.push(ProductValue.top())
         nxt = bc.next_pc(pc)
@@ -2121,7 +2230,9 @@ def product_astep(
         
         if not arr.nullness.is_definitely_non_null():
             yield "null pointer"
+            yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
         yield "out of bounds"
+        yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'ArrayIndexOutOfBoundsException'})
         
         nxt = bc.next_pc(pc)
         if nxt is not None:
@@ -2134,6 +2245,7 @@ def product_astep(
             arr = n.stack.pop()
             if not arr.nullness.is_definitely_non_null():
                 yield "null pointer"
+                yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
         # Length is >= 0
         n.stack.push(ProductValue(IntervalDomain.range(0, None), NonNullDomain.top()))
         nxt = bc.next_pc(pc)
@@ -2175,6 +2287,12 @@ def product_astep(
             receiver = args[-1]  # Last popped is first pushed (receiver)
             if not receiver.nullness.is_definitely_non_null():
                 yield "null pointer"
+                yield from _yield_to_exception_handlers(bc, frame, exception_handlers, {'NullPointerException'})
+        
+        # Invokes can throw exceptions - model path to exception handlers
+        # Any invoke can potentially throw (checked or unchecked exceptions)
+        # Pass None to match all exception types since we don't know what the method throws
+        yield from _yield_to_exception_handlers(bc, frame, exception_handlers, None)
 
         if returns is not None:
             n.stack.push(ProductValue.top())
@@ -2198,6 +2316,9 @@ def product_astep(
 
     # ---------- THROW ----------
     if tname == "Throw":
+        # Throw goes to exception handlers if within try block
+        # Pass None to match all exception types since we don't know what's being thrown
+        yield from _yield_to_exception_handlers(bc, frame, exception_handlers, None)
         yield "assertion error"
         return
 
@@ -2218,7 +2339,9 @@ def product_unbounded_run(
     method: jvm.AbsMethodID,
     init_locals: Dict[int, ProductValue] | None = None,
     widening_threshold: int = 3,
-) -> Tuple[set[str], set[int]]:
+    exception_handlers: list[ExceptionHandlerInfo] | None = None,
+    debug: bool = False,
+) -> Tuple[set[str], set[int], set[int]]:
     """
     Unbounded abstract interpretation using ProductValue (Interval + Nullness).
     
@@ -2226,12 +2349,21 @@ def product_unbounded_run(
     - IntervalDomain for numeric comparisons
     - NonNullDomain for null checks
     
+    With exception_handlers provided, also models exceptional control flow
+    to ensure exception handler code is marked as reachable.
+    
     Returns:
-        Tuple of (final_outcomes, visited_pcs)
+        Tuple of (final_outcomes, visited_pcs, all_pcs)
+        - final_outcomes: Set of possible outcomes (e.g., "ok", "assertion error")
+        - visited_pcs: Set of reachable PC offsets
+        - all_pcs: Set of all PC offsets in the method
     """
     bc = Bytecode(suite)
     start = PC(method, 0)
     init = PerVarFrame(locals=dict(init_locals or {}), stack=Stack.empty(), pc=start)
+    
+    # Get all PCs in the method
+    all_pcs = bc.all_offsets(method)
     
     worklist: list[PC] = [start]
     state: Dict[PC, PerVarFrame[ProductValue]] = {start: init}
@@ -2248,7 +2380,23 @@ def product_unbounded_run(
         if frame is None:
             continue
         
-        for out in product_astep(bc, frame):
+        if debug and pc.offset in {0, 1, 2, 3, 6}:
+            print(f"\n[DEBUG] Processing PC={pc.offset}")
+            print(f"  Frame locals: {frame.locals}")
+            print(f"  Frame stack: {frame.stack.items if frame.stack else []}")
+            print(f"  Join count at this PC: {join_counts.get(pc, 0)}")
+        
+        successors = list(product_astep(bc, frame, exception_handlers))
+        
+        if debug and pc.offset in {0, 1, 2, 3, 6}:
+            print(f"  Successors from product_astep: {len(successors)}")
+            for i, out in enumerate(successors):
+                if isinstance(out, str):
+                    print(f"    [{i}] outcome: {out}")
+                else:
+                    print(f"    [{i}] PC={out.pc.offset}, locals={out.locals}, stack={out.stack.items if out.stack else []}")
+        
+        for out in successors:
             if isinstance(out, str):
                 finals.add(out)
             else:
@@ -2261,19 +2409,37 @@ def product_unbounded_run(
                     
                     if count > widening_threshold:
                         new_frame = _widen_product_frame(old_frame, out)
+                        if debug and pc.offset in {0, 1, 2, 3, 6}:
+                            print(f"  WIDENING at PC={target_pc.offset} (count={count} > {widening_threshold})")
+                            print(f"    old_frame: locals={old_frame.locals}, stack={old_frame.stack.items if old_frame.stack else []}")
+                            print(f"    new_incoming: locals={out.locals}, stack={out.stack.items if out.stack else []}")
+                            print(f"    widened: locals={new_frame.locals}, stack={new_frame.stack.items if new_frame.stack else []}")
                     else:
                         new_frame = old_frame | out
+                        if debug and pc.offset in {0, 1, 2, 3, 6}:
+                            print(f"  JOIN at PC={target_pc.offset} (count={count} <= {widening_threshold})")
+                            print(f"    old_frame: locals={old_frame.locals}, stack={old_frame.stack.items if old_frame.stack else []}")
+                            print(f"    new_incoming: locals={out.locals}, stack={out.stack.items if out.stack else []}")
+                            print(f"    joined: locals={new_frame.locals}, stack={new_frame.stack.items if new_frame.stack else []}")
                     
-                    if not (new_frame <= old_frame):
+                    changed = not (new_frame <= old_frame)
+                    if debug and pc.offset in {0, 1, 2, 3, 6}:
+                        print(f"    new_frame <= old_frame? {new_frame <= old_frame} (changed={changed})")
+                    
+                    if changed:
                         state[target_pc] = new_frame
                         if target_pc not in worklist:
                             worklist.append(target_pc)
+                            if debug and pc.offset in {0, 1, 2, 3, 6}:
+                                print(f"  Re-added PC={target_pc.offset} to worklist (frame updated)")
                 else:
                     state[target_pc] = out
                     join_counts[target_pc] = 1
                     worklist.append(target_pc)
+                    if debug and pc.offset in {0, 1, 2, 3, 6}:
+                        print(f"  Added NEW PC={target_pc.offset} to worklist")
     
-    return finals, visited_pcs
+    return finals, visited_pcs, all_pcs
 
 
 def _widen_product_frame(old: PerVarFrame[ProductValue], new: PerVarFrame[ProductValue]) -> PerVarFrame[ProductValue]:

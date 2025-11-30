@@ -21,8 +21,7 @@ from __future__ import annotations
 import logging
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional, Tuple, Any
-from pathlib import Path
+from typing import Dict, List, Set, Optional, Tuple
 
 import jpamb
 from jpamb import jvm
@@ -421,7 +420,7 @@ class DynamicProfiler:
                             bytecode: list):
         """Execute method and record coverage/values."""
         # Import here to avoid circular imports
-        from interpreter import Frame, State, Stack, PC, Bytecode, step, suite as global_suite, bc as global_bc, logger as interp_logger
+        from interpreter import Frame, State, Stack, step, bc as global_bc, logger as interp_logger
         
         # Temporarily disable debug logging during execution
         interp_logger.disable("")
@@ -554,7 +553,7 @@ def print_profiling_report(result: ProfilingResult):
         
         # Show value ranges for parameters
         if profile.local_ranges:
-            print(f"   Value ranges:")
+            print("   Value ranges:")
             for idx in sorted(profile.local_ranges.keys())[:5]:  # First 5 locals
                 data = profile.local_ranges[idx]
                 range_str = f"[{data.min_value}, {data.max_value}]"

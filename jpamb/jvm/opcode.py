@@ -374,8 +374,42 @@ class Cast(Opcode):
         match self.from_:
             case jvm.Int():
                 match self.to_:
+                    case jvm.Long():
+                        return "i2l"
+                    case jvm.Float():
+                        return "i2f"
+                    case jvm.Double():
+                        return "i2d"
+                    case jvm.Byte():
+                        return "i2b"
+                    case jvm.Char():
+                        return "i2c"
                     case jvm.Short():
                         return "i2s"
+            case jvm.Long():
+                match self.to_:
+                    case jvm.Int():
+                        return "l2i"
+                    case jvm.Float():
+                        return "l2f"
+                    case jvm.Double():
+                        return "l2d"
+            case jvm.Float():
+                match self.to_:
+                    case jvm.Int():
+                        return "f2i"
+                    case jvm.Long():
+                        return "f2l"
+                    case jvm.Double():
+                        return "f2d"
+            case jvm.Double():
+                match self.to_:
+                    case jvm.Int():
+                        return "d2i"
+                    case jvm.Long():
+                        return "d2l"
+                    case jvm.Float():
+                        return "d2f"
 
         return super().real()
 

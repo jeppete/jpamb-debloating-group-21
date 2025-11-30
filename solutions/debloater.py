@@ -21,32 +21,6 @@ from pathlib import Path
 import jpamb
 from jpamb import jvm
 
-# Import analysis modules (using relative imports from components dir)
-from components.bytecode_analysis import BytecodeAnalyzer, AnalysisResult as BytecodeResult
-from components.syntaxer import BloatFinder
-from components.syntaxer.utils import create_java_parser
-
-# Import abstract interpreter with all domains (using full path from project root)
-from components.abstract_interpreter import (
-    interval_unbounded_run,
-    product_unbounded_run,
-    Bytecode,
-    ProductValue,
-)
-from components.abstract_domain import IntervalDomain, NonNullDomain
-
-# Import dynamic profiler (optional, for runtime profiling)
-try:
-    from components.dynamic_profiler import (
-        DynamicProfiler,
-        ProfilingResult,
-        print_profiling_report,
-    )
-    DYNAMIC_PROFILER_AVAILABLE = True
-except ImportError:
-    DYNAMIC_PROFILER_AVAILABLE = False
-
-
 # Add project root and components directory to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
 SOLUTIONS_DIR = Path(__file__).parent
@@ -55,13 +29,23 @@ for p in [PROJECT_ROOT, SOLUTIONS_DIR, COMPONENTS_DIR]:
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-# Import analysis modules (using relative imports from components dir)
+# Import analysis modules
 from solutions.components.bytecode_analysis import BytecodeAnalyzer, AnalysisResult as BytecodeResult  # noqa: E402
 from solutions.components.syntaxer import BloatFinder  # noqa: E402
 from solutions.components.syntaxer.utils import create_java_parser  # noqa: E402
 
-# Import abstract interpreter with all domains (using full path from project root)
+# Import abstract interpreter with all domains
 from solutions.components.abstract_interpreter import interval_unbounded_run, product_unbounded_run  # noqa: E402
+
+# Import dynamic profiler (optional, for runtime profiling)
+try:
+    from solutions.components.dynamic_profiler import (  # noqa: E402
+        DynamicProfiler,
+        ProfilingResult,
+    )
+    DYNAMIC_PROFILER_AVAILABLE = True
+except ImportError:
+    DYNAMIC_PROFILER_AVAILABLE = False
 
 
 log = logging.getLogger(__name__)
@@ -533,15 +517,17 @@ class Debloater:
                     
                     # Run abstract interpretation with configured domain
                     if self.abstract_domain == "product":
-                        outcomes, visited_pcs = product_unbounded_run(self.suite, abs_method)
+                        # product_unbounded_run returns (outcomes, visited_pcs, all_pcs)
+                        outcomes, visited_pcs, all_pcs = product_unbounded_run(self.suite, abs_method)
                     elif self.abstract_domain == "interval":
+                        # interval_unbounded_run returns (outcomes, visited_pcs) - 2 values
                         outcomes, visited_pcs = interval_unbounded_run(self.suite, abs_method)
+                        all_pcs = {inst.get("offset", -1) for inst in bytecode if inst.get("offset", -1) >= 0}
                     else:  # "sign"
                         from solutions.components.abstract_interpreter import unbounded_abstract_run
+                        # unbounded_abstract_run returns (outcomes, visited_pcs) - 2 values
                         outcomes, visited_pcs = unbounded_abstract_run(self.suite, abs_method)
-                    
-                    # Get all PCs in this method
-                    all_pcs = {inst.get("offset", -1) for inst in bytecode if inst.get("offset", -1) >= 0}
+                        all_pcs = {inst.get("offset", -1) for inst in bytecode if inst.get("offset", -1) >= 0}
                     
                     # Find unreachable PCs
                     unreachable_pcs = all_pcs - visited_pcs
@@ -929,8 +915,8 @@ class Debloater:
         # Dynamic Profiling results (hints only!)
         profiling_result = self.results.get('profiling')
         if profiling_result:
-            print(f"\n⚡ Dynamic Profiling (HINTS ONLY - not proof of dead code!):")
-            print(f"  ⚠️  WARNING: Dynamic profiling is unsound!")
+            print("\n⚡ Dynamic Profiling (HINTS ONLY - not proof of dead code!):")
+            print("  ⚠️  WARNING: Dynamic profiling is unsound!")
             print(f"  Methods profiled: {len(profiling_result.method_profiles)}")
             print(f"  Total executions: {profiling_result.total_executions}")
             print(f"  Average coverage: {profiling_result._get_average_coverage():.1f}%")
@@ -943,7 +929,7 @@ class Debloater:
                     low_coverage.append((method_name, coverage, len(profile.coverage.get_uncovered_indices())))
             
             if low_coverage:
-                print(f"\n  Potential cold code (not executed during profiling):")
+                print("\n  Potential cold code (not executed during profiling):")
                 for method, coverage, uncovered in sorted(low_coverage, key=lambda x: x[1])[:5]:
                     method_short = method.split(".")[-1]
                     print(f"    ⚠️  {method_short}: {coverage:.0f}% coverage ({uncovered} indices not hit)")
@@ -961,7 +947,7 @@ class Debloater:
                         interesting_ranges.append((method, idx, "never negative", min_v, max_v))
             
             if interesting_ranges:
-                print(f"\n  Value range hints:")
+                print("\n  Value range hints:")
                 for method, idx, hint, min_v, max_v in interesting_ranges[:5]:
                     method_short = method.split(".")[-1]
                     print(f"    💡 {method_short} local_{idx}: {hint} [{min_v}, {max_v}]")

@@ -8,8 +8,7 @@ then compares with the abstract interpreter's dead code detection.
 
 import subprocess
 import re
-from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple, Optional
 
 
@@ -246,12 +245,12 @@ def main():
         json_offsets = {inst['offset'] for inst in method_dict['code']['bytecode']}
         javap_offsets = javap_method.get_all_offsets()
         
-        print(f"\nOFFSET COMPARISON:")
+        print("\nOFFSET COMPARISON:")
         print(f"  javap offsets:  {sorted(javap_offsets)}")
         print(f"  JSON offsets:   {sorted(json_offsets)}")
         
         if javap_offsets != json_offsets:
-            print(f"  ⚠️  MISMATCH! JSON has different offsets than javap")
+            print("  ⚠️  MISMATCH! JSON has different offsets than javap")
             missing_in_json = javap_offsets - json_offsets
             extra_in_json = json_offsets - javap_offsets
             if missing_in_json:
@@ -259,35 +258,35 @@ def main():
             if extra_in_json:
                 print(f"  Extra in JSON: {sorted(extra_in_json)}")
         else:
-            print(f"  ✓ Offsets match")
+            print("  ✓ Offsets match")
         
         # Compare line tables
-        print(f"\nLINE TABLE COMPARISON:")
-        json_lines = {l['offset']: l['line'] for l in method_dict['code']['lines']}
+        print("\nLINE TABLE COMPARISON:")
+        json_lines = {entry['offset']: entry['line'] for entry in method_dict['code']['lines']}
         javap_lines = {v: k for k, v in javap_method.line_table.items()}  # offset -> line
         
         print(f"  javap line table: {javap_method.line_table}")
-        print(f"  JSON line table:  { {l['line']: l['offset'] for l in method_dict['code']['lines']} }")
+        print(f"  JSON line table:  { {entry['line']: entry['offset'] for entry in method_dict['code']['lines']} }")
         
         mismatches = []
         for line, offset in javap_method.line_table.items():
             json_offset = None
-            for l in method_dict['code']['lines']:
-                if l['line'] == line:
-                    json_offset = l['offset']
+            for entry in method_dict['code']['lines']:
+                if entry['line'] == line:
+                    json_offset = entry['offset']
                     break
             if json_offset != offset:
                 mismatches.append((line, offset, json_offset))
         
         if mismatches:
-            print(f"  ⚠️  LINE TABLE MISMATCHES:")
+            print("  ⚠️  LINE TABLE MISMATCHES:")
             for line, javap_off, json_off in mismatches:
                 print(f"     Line {line}: javap={javap_off}, json={json_off}")
         else:
-            print(f"  ✓ Line tables match")
+            print("  ✓ Line tables match")
         
         # Show branch/jump target comparison
-        print(f"\nJUMP TARGET COMPARISON:")
+        print("\nJUMP TARGET COMPARISON:")
         json_bytecode = method_dict['code']['bytecode']
         
         for offset, instr, javap_target in javap_method.bytecode:
@@ -305,7 +304,7 @@ def main():
                     print(f"  ✓ Offset {offset} ({instr}): target={javap_target}")
         
         # Show dead code detection results
-        print(f"\nABSTRACT INTERPRETER RESULTS:")
+        print("\nABSTRACT INTERPRETER RESULTS:")
         print(f"  Visited offsets: {sorted(visited)}")
         print(f"  Dead offsets:    {sorted(dead_offsets)}")
         
@@ -329,7 +328,7 @@ def main():
         print(f"  Dead lines (using JSON line table):  {sorted(dead_lines_json)}")
         
         if dead_lines_javap != dead_lines_json:
-            print(f"  ⚠️  Line mapping differs due to incorrect JSON line table!")
+            print("  ⚠️  Line mapping differs due to incorrect JSON line table!")
 
 
 if __name__ == '__main__':

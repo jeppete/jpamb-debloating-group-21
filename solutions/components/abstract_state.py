@@ -175,6 +175,23 @@ class Bytecode:
             return int(getattr(ops[index], "offset", 0))
         # If index is out of bounds, return it as-is (may cause IndexError later)
         return index
+    
+    def all_offsets(self, method: jvm.AbsMethodID) -> set[int]:
+        """
+        Get all bytecode offsets for a method.
+        
+        This returns ALL PCs in the method, which can be used to determine
+        which PCs are unreachable (dead code).
+        
+        Args:
+            method: The method to get offsets for
+            
+        Returns:
+            Set of all bytecode offsets in the method
+        """
+        self._ensure(method)
+        assert self._sorted_offsets is not None
+        return set(self._sorted_offsets[method])
 
 
 # --- Per‑instruction abstract frame -----------------------------------------
