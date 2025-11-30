@@ -16,6 +16,9 @@ reports/
 # Generated trace files
 traces/
 
+# Debloating class
+target/debloated/
+
 # Generated output files from interpreter
 initial_states.json
 *_states.json

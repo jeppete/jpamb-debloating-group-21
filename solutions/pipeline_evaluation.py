@@ -1046,6 +1046,8 @@ def _trace_to_method_id(trace_name: str) -> Optional[str]:
     """Convert trace filename to method_id.
     
     Example: jpamb.cases.Simple_assertPositive_IV → jpamb.cases.Simple.assertPositive:(I)V
+    Example: jpamb.cases.Calls_generatePrimeArray_I[I → jpamb.cases.Calls.generatePrimeArray:(I)[I
+    Example: jpamb.cases.Arrays_arrayNotEmpty_[IV → jpamb.cases.Arrays.arrayNotEmpty:([I)V
     """
     parts = trace_name.split("_")
     if len(parts) < 2:
@@ -1069,13 +1071,37 @@ def _trace_to_method_id(trace_name: str) -> Optional[str]:
     class_name = ".".join(dot_parts[:-1]) + "." + last[:underscore_idx]
     method_name = last[underscore_idx + 1:]
     
-    # Reconstruct descriptor: IV → (I)V
-    if len(descriptor) > 0:
-        ret = descriptor[-1]
-        params = descriptor[:-1]
-        desc = f"({params}){ret}"
-    else:
+    # Parse descriptor into params and return type
+    # Types: I, Z, V, D, F, C, B, S, J, [I, [C, etc.
+    # Examples: IV → (I)V, [IV → ([I)V, I[I → (I)[I, II → (I)I
+    if len(descriptor) == 0:
         desc = "()V"
+    else:
+        # Parse types from left to right
+        types = []
+        i = 0
+        while i < len(descriptor):
+            if descriptor[i] == '[':
+                # Array type - consume [ and the element type
+                arr = '['
+                i += 1
+                if i < len(descriptor):
+                    arr += descriptor[i]
+                    i += 1
+                types.append(arr)
+            else:
+                types.append(descriptor[i])
+                i += 1
+        
+        if len(types) == 0:
+            desc = "()V"
+        elif len(types) == 1:
+            desc = f"(){types[0]}"
+        else:
+            # Last type is return, rest are params
+            ret = types[-1]
+            params = "".join(types[:-1])
+            desc = f"({params}){ret}"
     
     return f"{class_name}.{method_name}:{desc}"
 

@@ -23,7 +23,8 @@ public class Runtime {
       jpamb.cases.Arrays.class,
       Dependent.class,
       Calls.class,
-      Debloating.class);
+      Debloating.class,
+      AbstractInterpreterCases.class);
 
   public static Case[] cases(Method m) {
     var cases = m.getAnnotation(Cases.class);

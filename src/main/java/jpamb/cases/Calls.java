@@ -6,14 +6,18 @@ import static jpamb.utils.Tag.TagType.*;
 
 public class Calls {
 
+  @Case("() -> ok")
   public static void assertTrue() {
     assert true;
   }
 
+  @Case("() -> assertion error")
   public static void assertFalse() {
     assert false;
   }
 
+  @Case("(true) -> ok")
+  @Case("(false) -> assertion error")
   public static void assertIf(boolean test) {
     if (test) {
       assertTrue();
@@ -46,6 +50,10 @@ public class Calls {
     assertIf(true);
   }
 
+  @Case("(8) -> ok")
+  @Case("(1) -> ok")
+  @Case("(0) -> ok")
+  @Case("(-1) -> assertion error")
   public static int fib(int i) {
     assert i >= 0;
     if (i == 0 || i == 1)
@@ -61,6 +69,10 @@ public class Calls {
     assert fib(i) == 21;
   }
 
+  @Case("(5) -> ok")
+  @Case("(1) -> ok")
+  @Case("(0) -> assertion error")
+  @Case("(-1) -> assertion error")
   public static int[] generatePrimeArray(int length) {
     assert length >= 0;
     int[] primeArray = new int[length];

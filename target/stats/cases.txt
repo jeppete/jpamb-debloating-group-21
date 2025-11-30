@@ -1,3 +1,39 @@
+jpamb.cases.AbstractInterpreterCases.arithmeticConstraints:(I)I (10) -> ok
+jpamb.cases.AbstractInterpreterCases.arithmeticConstraints:(I)I (20) -> ok
+jpamb.cases.AbstractInterpreterCases.arrayBoundsTracking:(I)I (10) -> ok
+jpamb.cases.AbstractInterpreterCases.arrayBoundsTracking:(I)I (5) -> ok
+jpamb.cases.AbstractInterpreterCases.booleanValueTracking:(Z)I (false) -> ok
+jpamb.cases.AbstractInterpreterCases.booleanValueTracking:(Z)I (true) -> ok
+jpamb.cases.AbstractInterpreterCases.chainedComparisons:(I)I (7) -> ok
+jpamb.cases.AbstractInterpreterCases.chainedComparisons:(I)I (8) -> ok
+jpamb.cases.AbstractInterpreterCases.complexArithmetic:(I)I  (3) -> ok
+jpamb.cases.AbstractInterpreterCases.complexArithmetic:(I)I  (7) -> ok
+jpamb.cases.AbstractInterpreterCases.constantPropagation:()I () -> ok
+jpamb.cases.AbstractInterpreterCases.contradictoryConditions:(I)I (15) -> ok
+jpamb.cases.AbstractInterpreterCases.contradictoryConditions:(I)I (5) -> ok
+jpamb.cases.AbstractInterpreterCases.divisionByZeroTracking:(I)I (10) -> ok
+jpamb.cases.AbstractInterpreterCases.divisionByZeroTracking:(I)I (5) -> ok
+jpamb.cases.AbstractInterpreterCases.loopInvariant:(I)I      (5) -> ok
+jpamb.cases.AbstractInterpreterCases.moduloAnalysis:(I)I     (10) -> ok
+jpamb.cases.AbstractInterpreterCases.moduloAnalysis:(I)I     (11) -> ok
+jpamb.cases.AbstractInterpreterCases.multipleConstraints:(I)I (12) -> ok
+jpamb.cases.AbstractInterpreterCases.multipleConstraints:(I)I (8) -> ok
+jpamb.cases.AbstractInterpreterCases.nestedValueDependencies:(I)I (6) -> ok
+jpamb.cases.AbstractInterpreterCases.nestedValueDependencies:(I)I (8) -> ok
+jpamb.cases.AbstractInterpreterCases.oldClassicCheck:(I)I    (15) -> ok
+jpamb.cases.AbstractInterpreterCases.oldClassicCheck:(I)I    (5) -> ok
+jpamb.cases.AbstractInterpreterCases.positiveNotZero:(I)I    (-5) -> ok
+jpamb.cases.AbstractInterpreterCases.positiveNotZero:(I)I    (5) -> ok
+jpamb.cases.AbstractInterpreterCases.rangeAnalysis:(I)I      (3) -> ok
+jpamb.cases.AbstractInterpreterCases.rangeAnalysis:(I)I      (7) -> ok
+jpamb.cases.AbstractInterpreterCases.signContradiction:(I)I  (-5) -> ok
+jpamb.cases.AbstractInterpreterCases.signContradiction:(I)I  (5) -> ok
+jpamb.cases.AbstractInterpreterCases.squareCheck:(I)I        (16) -> ok
+jpamb.cases.AbstractInterpreterCases.squareCheck:(I)I        (4) -> ok
+jpamb.cases.AbstractInterpreterCases.squareCheck:(I)I        (5) -> ok
+jpamb.cases.AbstractInterpreterCases.squareCheck:(I)I        (9) -> ok
+jpamb.cases.AbstractInterpreterCases.valuePropagation:(I)I   (0) -> assertion error
+jpamb.cases.AbstractInterpreterCases.valuePropagation:(I)I   (5) -> ok
 jpamb.cases.Arrays.arrayContent:()V                          () -> assertion error
 jpamb.cases.Arrays.arrayInBounds:()V                         () -> ok
 jpamb.cases.Arrays.arrayIsNull:()V                           () -> null pointer
@@ -18,6 +54,10 @@ jpamb.cases.Arrays.binarySearch:(I)V                         (6) -> assertion er
 jpamb.cases.Calls.allPrimesArePositive:(I)V                  (-1) -> assertion error
 jpamb.cases.Calls.allPrimesArePositive:(I)V                  (0) -> out of bounds
 jpamb.cases.Calls.allPrimesArePositive:(I)V                  (100) -> ok
+jpamb.cases.Calls.assertFalse:()V                            () -> assertion error
+jpamb.cases.Calls.assertIf:(Z)V                              (false) -> assertion error
+jpamb.cases.Calls.assertIf:(Z)V                              (true) -> ok
+jpamb.cases.Calls.assertTrue:()V                             () -> ok
 jpamb.cases.Calls.callsAssertFalse:()V                       () -> assertion error
 jpamb.cases.Calls.callsAssertFib:(I)V                        (0) -> assertion error
 jpamb.cases.Calls.callsAssertFib:(I)V                        (8) -> ok
@@ -25,6 +65,14 @@ jpamb.cases.Calls.callsAssertIf:(Z)V                         (false) -> assertio
 jpamb.cases.Calls.callsAssertIf:(Z)V                         (true) -> ok
 jpamb.cases.Calls.callsAssertIfWithTrue:()V                  () -> ok
 jpamb.cases.Calls.callsAssertTrue:()V                        () -> ok
+jpamb.cases.Calls.fib:(I)I                                   (-1) -> assertion error
+jpamb.cases.Calls.fib:(I)I                                   (0) -> ok
+jpamb.cases.Calls.fib:(I)I                                   (1) -> ok
+jpamb.cases.Calls.fib:(I)I                                   (8) -> ok
+jpamb.cases.Calls.generatePrimeArray:(I)[I                   (-1) -> assertion error
+jpamb.cases.Calls.generatePrimeArray:(I)[I                   (0) -> assertion error
+jpamb.cases.Calls.generatePrimeArray:(I)[I                   (1) -> ok
+jpamb.cases.Calls.generatePrimeArray:(I)[I                   (5) -> ok
 jpamb.cases.Debloating.allBranchesExit:(IZ)I                 (0, true) -> divide by zero
 jpamb.cases.Debloating.allBranchesExit:(IZ)I                 (5, false) -> ok
 jpamb.cases.Debloating.allBranchesExit:(IZ)I                 (5, true) -> ok
