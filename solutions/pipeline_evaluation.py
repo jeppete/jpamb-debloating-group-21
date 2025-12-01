@@ -25,9 +25,10 @@ import sys
 import os
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import Dict, List, Set, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Add project path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -116,6 +117,9 @@ class PipelineResult:
     iai: Optional[IAIResult] = None
     ncr: Optional[NCRResult] = None
     error: Optional[str] = None
+    # Timing information (in seconds)
+    timing: Dict[str, float] = field(default_factory=dict)
+    total_time: float = 0.0
 
 
 # =============================================================================
@@ -798,8 +802,10 @@ def run_pipeline(method_id: str, verbose: bool = True) -> PipelineResult:
         4. NCR: Dead code removal
     
     Returns:
-        PipelineResult with all step results
+        PipelineResult with all step results (includes timing per step)
     """
+    pipeline_start = time.perf_counter()
+    
     if verbose:
         print("╔" + "═" * 78 + "╗")
         print("║" + " COMPLETE FINE-GRAINED DEBLOATING PIPELINE".center(78) + "║")
@@ -808,25 +814,41 @@ def run_pipeline(method_id: str, verbose: bool = True) -> PipelineResult:
         print(f"\nTarget Method: {method_id}")
     
     result = PipelineResult(method_id=method_id)
+    timing = {}
     
     try:
         # Initialize Suite once
+        t0 = time.perf_counter()
         suite = Suite()
+        timing['suite_init'] = time.perf_counter() - t0
         
         # Step 0: ISY
+        t0 = time.perf_counter()
         result.isy = step_isy(method_id, suite, verbose)
+        timing['isy'] = time.perf_counter() - t0
         
         # Step 1: IIN
+        t0 = time.perf_counter()
         result.iin = step_iin(method_id, verbose)
+        timing['iin'] = time.perf_counter() - t0
         
         # Step 2: NAN
+        t0 = time.perf_counter()
         result.nan = step_nan(result.iin, verbose)
+        timing['nan'] = time.perf_counter() - t0
         
         # Step 3: IAI+IBA+NAB
+        t0 = time.perf_counter()
         result.iai = step_iai(result.isy, result.nan, suite, verbose)
+        timing['iai'] = time.perf_counter() - t0
         
         # Step 4: NCR
+        t0 = time.perf_counter()
         result.ncr = step_ncr(result.isy, result.iai, verbose)
+        timing['ncr'] = time.perf_counter() - t0
+        
+        result.timing = timing
+        result.total_time = time.perf_counter() - pipeline_start
         
         if verbose:
             print("\n" + "=" * 80)
@@ -837,9 +859,18 @@ def run_pipeline(method_id: str, verbose: bool = True) -> PipelineResult:
             print(f"  Dead code: {result.iai.dead_code_count} instructions")
             if result.isy.instruction_count > 0:
                 print(f"  Removal: {result.iai.dead_code_count / result.isy.instruction_count * 100:.1f}%")
+            print(f"\n  Timing:")
+            print(f"    Suite init: {timing.get('suite_init', 0)*1000:.2f} ms")
+            print(f"    ISY (parse):  {timing.get('isy', 0)*1000:.2f} ms")
+            print(f"    IIN (traces): {timing.get('iin', 0)*1000:.2f} ms")
+            print(f"    NAN (abstraction): {timing.get('nan', 0)*1000:.2f} ms")
+            print(f"    IAI (analysis): {timing.get('iai', 0)*1000:.2f} ms")
+            print(f"    NCR (rewrite): {timing.get('ncr', 0)*1000:.2f} ms")
+            print(f"    TOTAL: {result.total_time*1000:.2f} ms")
         
     except Exception as e:
         result.error = str(e)
+        result.total_time = time.perf_counter() - pipeline_start
         if verbose:
             print(f"\n✗ Pipeline failed: {e}")
             import traceback
@@ -987,7 +1018,7 @@ def _clean_stale_traces(trace_dir: Path, verbose: bool = False) -> int:
     return stale_count
 
 
-def run_pipeline_all(verbose: bool = False) -> List[PipelineResult]:
+def run_pipeline_all(verbose: bool = False, skip_ncr: bool = False) -> List[PipelineResult]:
     """
     Run the pipeline on ALL JPAMB methods from decompiled JSON files.
     
@@ -997,6 +1028,8 @@ def run_pipeline_all(verbose: bool = False) -> List[PipelineResult]:
     Always regenerates traces before analysis to ensure fresh data.
     
     Args:
+        verbose: Show detailed output for each method
+        skip_ncr: Skip NCR step for faster timing analysis
         verbose: Show detailed output for each method
     
     Returns:
@@ -1047,7 +1080,7 @@ def run_pipeline_all(verbose: bool = False) -> List[PipelineResult]:
         result = run_pipeline(method_id, verbose=verbose)
         results.append(result)
         
-        # Brief summary
+        # Brief summary with timing
         if result.error:
             print(f"    ✗ Error: {result.error[:50]}...")
         elif result.iai:
@@ -1055,7 +1088,8 @@ def run_pipeline_all(verbose: bool = False) -> List[PipelineResult]:
             if result.iai.dead_statement_count > 0:
                 stmt_info = f", {result.iai.dead_statement_count} statements"
             trace_note = " (static-only)" if not has_trace else ""
-            print(f"    ✓ Dead code: {result.iai.dead_code_count} instructions{stmt_info}{trace_note}")
+            time_info = f" [{result.total_time*1000:.1f}ms]"
+            print(f"    ✓ Dead code: {result.iai.dead_code_count} instructions{stmt_info}{trace_note}{time_info}")
         print()
     
     # Summary
@@ -1119,6 +1153,47 @@ def run_pipeline_all(verbose: bool = False) -> List[PipelineResult]:
             print(f"\nDebloated classes ({len(debloated_classes)}):")
             for c in sorted(debloated_classes):
                 print(f"  {c.name}")
+    
+    # Timing summary
+    print("\n" + "=" * 80)
+    print("TIMING SUMMARY (per method)")
+    print("=" * 80)
+    
+    # Calculate timing statistics
+    successful_results = [r for r in results if r.total_time > 0 and r.timing]
+    if successful_results:
+        total_pipeline_time = sum(r.total_time for r in successful_results)
+        avg_time = total_pipeline_time / len(successful_results)
+        max_result = max(successful_results, key=lambda r: r.total_time)
+        min_result = min(successful_results, key=lambda r: r.total_time)
+        
+        # Aggregate timing by step
+        step_totals = {'suite_init': 0.0, 'isy': 0.0, 'iin': 0.0, 'nan': 0.0, 'iai': 0.0, 'ncr': 0.0}
+        for r in successful_results:
+            for step, t in r.timing.items():
+                step_totals[step] = step_totals.get(step, 0.0) + t
+        
+        print(f"\nMethods analyzed: {len(successful_results)}")
+        print(f"Total analysis time: {total_pipeline_time:.2f}s")
+        print(f"Average per method: {avg_time*1000:.2f} ms")
+        print(f"Fastest: {min_result.method_id.split('.')[-1]} ({min_result.total_time*1000:.2f} ms)")
+        print(f"Slowest: {max_result.method_id.split('.')[-1]} ({max_result.total_time*1000:.2f} ms)")
+        
+        print("\nTime by step (total / avg):")
+        for step, total in step_totals.items():
+            avg = total / len(successful_results) * 1000
+            pct = total / total_pipeline_time * 100 if total_pipeline_time > 0 else 0
+            print(f"  {step:<12}: {total:.2f}s / {avg:.2f}ms avg ({pct:.1f}%)")
+        
+        # Top 10 slowest methods
+        print("\nTop 10 slowest methods:")
+        print(f"  {'Method':<55} {'Time (ms)':<12} {'IAI (ms)':<12}")
+        print("  " + "-" * 80)
+        sorted_by_time = sorted(successful_results, key=lambda r: r.total_time, reverse=True)[:10]
+        for r in sorted_by_time:
+            short_name = r.method_id.split(".")[-1][:50]
+            iai_time = r.timing.get('iai', 0) * 1000
+            print(f"  {short_name:<55} {r.total_time*1000:>8.2f}    {iai_time:>8.2f}")
     
     return results
 
@@ -1321,6 +1396,11 @@ def main():
         
         elif arg == "--all":
             run_pipeline_all(verbose=False)
+            return
+        
+        elif arg == "--timing":
+            # Fast timing mode - skip NCR for performance measurement
+            run_pipeline_all(verbose=False, skip_ncr=True)
             return
         
         elif arg == "--help":
