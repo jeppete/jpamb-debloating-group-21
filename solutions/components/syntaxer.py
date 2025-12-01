@@ -26,7 +26,6 @@ ANALYSIS_TAGS = ["syntactic", "python"]
 
 
 def resolve_source_path(methodid: jpamb.jvm.AbsMethodID) -> Path:
-    """Return an absolute path to the Java source file for the method."""
     srcpath = jpamb.sourcefile(methodid)
     if not srcpath.is_absolute():
         srcpath = Path.cwd() / srcpath
@@ -34,7 +33,6 @@ def resolve_source_path(methodid: jpamb.jvm.AbsMethodID) -> Path:
 
 
 def run_analysis(methodid: jpamb.jvm.AbsMethodID) -> BloatFinder:
-    """Parse the source file and run the bloat finder."""
     parser = create_java_parser()
     srcpath = resolve_source_path(methodid)
     log.debug("parse sourcefile %s", srcpath)
@@ -58,8 +56,6 @@ def main():
 
     finder = run_analysis(methodid)
     
-    # For now, output a simple prediction to satisfy the test framework
-    # This is a placeholder - your syntaxer is for bloat detection, not prediction
     print("ok;50%")
 
 if __name__ == "__main__":

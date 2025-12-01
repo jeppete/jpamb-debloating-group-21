@@ -9,12 +9,6 @@ import tree_sitter_java
 
 
 def create_java_parser() -> tree_sitter.Parser:
-    """
-    Create a Tree-sitter parser configured for Java.
-
-    Supports both the modern bindings (Parser() + set_language) and
-    older releases that expect the language in the constructor.
-    """
 
     language = tree_sitter.Language(tree_sitter_java.language())
     try:
@@ -30,12 +24,10 @@ def create_java_parser() -> tree_sitter.Parser:
 
 
 def node_text(node: tree_sitter.Node, source_bytes: bytes) -> str:
-    """Decode the bytes that correspond to a node."""
     return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def iter_nodes(root: tree_sitter.Node) -> Iterator[tree_sitter.Node]:
-    """Iterative preorder traversal of the syntax tree."""
     stack = [root]
     while stack:
         node = stack.pop()

@@ -14,8 +14,6 @@ log = logging.getLogger(__name__)
 
 
 class BloatFinder:
-    """Wraps the analysis context and executes the registered checks."""
-
     def __init__(self, tree: tree_sitter.Tree, source_bytes: bytes):
         self.context = AnalysisContext(tree, source_bytes)
         self.issues: list[Issue] = []

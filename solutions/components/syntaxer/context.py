@@ -12,8 +12,6 @@ from .utils import iter_nodes, node_text
 
 @dataclass
 class AnalysisContext:
-    """Holds the parsed tree, source bytes, and derived facts."""
-
     tree: tree_sitter.Tree
     source_bytes: bytes
     field_decls: Dict[str, tree_sitter.Node] = field(init=False, default_factory=dict)
@@ -24,15 +22,11 @@ class AnalysisContext:
         self._collect_fields_and_constants()
         self._count_field_uses()
 
-    # ----- general helpers -----
-
     def text(self, node: tree_sitter.Node | None) -> str:
         return node_text(node, self.source_bytes) if node is not None else ""
 
     def iter_nodes(self) -> Iterator[tree_sitter.Node]:
         return iter_nodes(self.tree.root_node)
-
-    # ----- collection passes -----
 
     def _collect_fields_and_constants(self):
         root = self.tree.root_node
@@ -42,7 +36,7 @@ class AnalysisContext:
 
             declarator = node.child_by_field_name("declarator")
             if declarator is None:
-                continue  # skip multi-declarator forms
+                continue 
 
             name_node = declarator.child_by_field_name("name")
             if name_node is None:
@@ -68,4 +62,4 @@ class AnalysisContext:
             if node.type == "identifier":
                 name = self.text(node)
                 if name in self.field_uses:
-                    self.field_uses[name] += 1  # includes declaration occurrence
+                    self.field_uses[name] += 1 
