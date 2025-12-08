@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Dict, List, Set, Optional
 from dataclasses import dataclass, field
 
-# Add project path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from jpamb import jvm
@@ -42,10 +41,6 @@ from solutions.components.abstract_interpreter import product_unbounded_run, Pro
 from solutions.code_rewriter import CodeRewriter
 
 
-# =============================================================================
-# Data Classes for Pipeline Results
-# =============================================================================
-
 @dataclass
 class ISYResult:
     """Result from ISY (Interpret Syntactic Information) step."""
@@ -54,13 +49,10 @@ class ISYResult:
     method_name: str
     bytecode: List[dict]
     instruction_count: int
-    cfg: CFG  # CFG from BytecodeAnalyzer
+    cfg: CFG
     all_offsets: Set[int]
-    # Line number table: offset -> line number
     line_table: Dict[int, int] = None
-    # All unique statement line numbers
     all_statements: Set[int] = None
-    # Exception handlers: list of {start, end, handler, catchType}
     exception_handlers: List[dict] = None
 
 
@@ -90,8 +82,7 @@ class IAIResult:
     unreachable_pcs: Set[int]
     outcomes: Set[str]
     dead_code_count: int
-    # Statement-level dead code info
-    dead_statements: Set[int] = None  # Line numbers of dead statements
+    dead_statements: Set[int] = None
     dead_statement_count: int = 0
     total_statements: int = 0
 

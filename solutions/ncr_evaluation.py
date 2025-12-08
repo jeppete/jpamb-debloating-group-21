@@ -1,21 +1,4 @@
-#!/usr/bin/env python3
-"""
-NCR Evaluation Script
-
-Demonstrates NCR (Analysis-informed Code Rewriting) for 10 points.
-
-NCR removes STATICALLY DEAD CODE - code that is unreachable regardless of input.
-This is code after unconditional throws, unreachable branches, etc.
-
-This script:
-1. Uses abstract interpreter to find statically unreachable code
-2. Rewrites class files with dead code replaced by NOPs
-3. Verifies rewritten classes are valid
-4. Shows bytecode size comparison table
-
-Usage:
-    python solutions/ncr_evaluation.py
-"""
+"""NCR Evaluation Script - Demonstrates analysis-informed code rewriting."""
 
 import sys
 import os
@@ -25,7 +8,6 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-# Add project path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from jpamb import jvm
@@ -34,30 +16,14 @@ from solutions.components.abstract_interpreter import unbounded_abstract_run
 from solutions.code_rewriter import CodeRewriter
 
 
-# =============================================================================
-# Abstract Interpreter Integration for Dead Code Detection  
-# =============================================================================
-
 def find_statically_unreachable(
     suite: Suite,
     method_id: str,
 ) -> Tuple[Set[int], set]:
-    """
-    Use abstract interpreter to find STATICALLY unreachable bytecode offsets.
-    This means code unreachable with ANY input (no constraints).
-    
-    Args:
-        suite: JPAMB Suite
-        method_id: Method identifier string
-        
-    Returns:
-        (unreachable_offsets, outcomes)
-    """
+    """Find statically unreachable bytecode offsets (unreachable with any input)."""
     method = jvm.AbsMethodID.decode(method_id)
-    # No input constraints = find only statically dead code
     outcomes, visited = unbounded_abstract_run(suite, method, None)
     
-    # Get all bytecode offsets from method
     method_data = suite.findmethod(method)
     bytecode = method_data.get('code', {}).get('bytecode', [])
     all_offsets = {bc['offset'] for bc in bytecode}
@@ -81,12 +47,7 @@ def get_method_info(json_file: Path, method_name: str) -> Tuple[Set[int], List[d
 
 
 def discover_all_methods(decompiled_dir: Path) -> List[Tuple[str, str, str]]:
-    """
-    Dynamically discover all methods from JSON files.
-    
-    Returns:
-        List of (method_id, method_name, class_name) tuples
-    """
+    """Discover all methods from JSON files."""
     methods = []
     
     for json_file in sorted(decompiled_dir.glob("*.json")):
@@ -95,7 +56,6 @@ def discover_all_methods(decompiled_dir: Path) -> List[Tuple[str, str, str]]:
         with open(json_file) as f:
             data = json.load(f)
         
-        # Package is in format "jpamb/cases/Simple", convert to "jpamb.cases"
         full_name = data.get('name', '')
         package = '.'.join(full_name.replace('/', '.').rsplit('.', 1)[:-1])
         

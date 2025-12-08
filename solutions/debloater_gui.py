@@ -70,7 +70,7 @@ class DebloaterGUI:
         btn_section.pack(side=tk.RIGHT)
         
         ttk.Button(btn_section, text="Clear", command=self.clear_results).pack(side=tk.RIGHT, padx=4)
-        self.analyze_btn = ttk.Button(btn_section, text="🔍 Analyze", command=self.run_analysis)
+        self.analyze_btn = ttk.Button(btn_section, text="Analyze", command=self.run_analysis)
         self.analyze_btn.pack(side=tk.RIGHT, padx=4)
         
         # ============ INPUT SECTION ============
@@ -119,35 +119,14 @@ class DebloaterGUI:
         options_row = ttk.Frame(options_frame)
         options_row.pack(fill=tk.X)
         
-        # Abstract interpreter toggle
+        # Abstract interpreter toggle (domain always "product", hidden from user)
         self.abstract_interp_var = tk.BooleanVar(value=True)
         self.abstract_interp_cb = ttk.Checkbutton(
             options_row, 
-            text="🧠 Abstract Interpreter",
-            variable=self.abstract_interp_var,
-            command=self.on_abstract_toggle
+            text="Abstract Interpreter",
+            variable=self.abstract_interp_var
         )
         self.abstract_interp_cb.pack(side=tk.LEFT, padx=(0, 16))
-        
-        # Domain selection
-        self.domain_frame = ttk.Frame(options_row)
-        self.domain_frame.pack(side=tk.LEFT)
-        
-        ttk.Label(self.domain_frame, text="Domain:").pack(side=tk.LEFT, padx=(0, 4))
-        self.domain_var = tk.StringVar(value="product")
-        self.domain_combo = ttk.Combobox(
-            self.domain_frame, 
-            textvariable=self.domain_var,
-            values=["sign", "interval", "product"],
-            state="readonly",
-            width=10
-        )
-        self.domain_combo.pack(side=tk.LEFT)
-        
-        # Tooltip-style label
-        self.domain_info = ttk.Label(options_row, text="(Product = Interval + Nullness)", 
-                                    font=("Arial", 9), foreground="gray")
-        self.domain_info.pack(side=tk.LEFT, padx=8)
         
         # Dynamic profiling toggle (second row)
         options_row2 = ttk.Frame(options_frame)
@@ -156,14 +135,14 @@ class DebloaterGUI:
         self.dynamic_profiling_var = tk.BooleanVar(value=False)
         self.dynamic_profiling_cb = ttk.Checkbutton(
             options_row2,
-            text="⚡ Dynamic Profiling",
+            text="Dynamic Profiling",
             variable=self.dynamic_profiling_var
         )
         self.dynamic_profiling_cb.pack(side=tk.LEFT, padx=(0, 8))
         
         self.profiling_warning = ttk.Label(
             options_row2, 
-            text="⚠️ UNSOUND - hints only, not for code deletion!",
+            text="hints only",
             font=("Arial", 9), 
             foreground="orange"
         )
@@ -203,10 +182,6 @@ class DebloaterGUI:
         self.methods_count_label = create_stat_card(stats_row, 2, "Unreachable Methods", "0")
         self.verified_count_label = create_stat_card(stats_row, 3, "Verified (Both)", "0", "darkgreen")
         self.total_lines_label = create_stat_card(stats_row, 4, "Total Dead Lines", "0", "darkred")
-        
-        # Progress bar
-        self.progress = ttk.Progressbar(stats_frame, mode='indeterminate')
-        self.progress.pack(fill=tk.X, pady=(8, 0))
         
         # ============ BOTTOM: Results Panel ============
         results_frame = ttk.Frame(self.root)
@@ -275,7 +250,7 @@ class DebloaterGUI:
         ttk.Label(legend_frame, text="Legend:", font=("Arial", 9, "bold")).pack(side=tk.LEFT, padx=5)
         
         # Both pipelines - verified
-        both_label = tk.Label(legend_frame, text=" ✅ Verified ", bg='#663333', fg='#ffaaaa', 
+        both_label = tk.Label(legend_frame, text=" Verified ", bg='#663333', fg='#ffaaaa', 
                              relief=tk.RAISED, padx=3, font=('Courier', 8))
         both_label.pack(side=tk.LEFT, padx=2)
         
@@ -309,24 +284,24 @@ class DebloaterGUI:
         
         # Tab 1: Combined Results
         self.combined_tab = self.create_results_tab("Combined")
-        self.notebook.add(self.combined_tab, text="📋 Combined Results")
+        self.notebook.add(self.combined_tab, text="Combined Results")
         
         # Tab 2: Source Analysis
         self.source_tab = self.create_results_tab("Source")
-        self.notebook.add(self.source_tab, text="📝 Source Analysis")
+        self.notebook.add(self.source_tab, text="Source Analysis")
         
         # Tab 3: Bytecode Analysis
         self.bytecode_tab = self.create_results_tab("Bytecode")
-        self.notebook.add(self.bytecode_tab, text="🔍 Bytecode Analysis")
+        self.notebook.add(self.bytecode_tab, text="Bytecode Analysis")
         
-        # Tab 4: Dynamic Profiling (new)
+        # Tab 4: Dynamic Profiling
         self.profiling_tab = self.create_profiling_tab()
-        self.notebook.add(self.profiling_tab, text="⚡ Dynamic Profiling")
+        self.notebook.add(self.profiling_tab, text="Dynamic Profiling")
         
         # Tab 5: Log
         self.log_tab = scrolledtext.ScrolledText(self.notebook, wrap=tk.WORD, 
                                                  height=15, font=("Courier", 9))
-        self.notebook.add(self.log_tab, text="📄 Log")
+        self.notebook.add(self.log_tab, text="Log")
         
         # ============ BOTTOM: Status Bar ============
         self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN)
@@ -387,7 +362,7 @@ class DebloaterGUI:
         
         warning_label = ttk.Label(
             warning_frame,
-            text="⚠️  UNSOUND: These are hints only! Do NOT use for code deletion!",
+            text="UNSOUND: These are hints only! Do NOT use for code deletion!",
             font=("Arial", 10, "bold"),
             foreground="orange"
         )
@@ -486,17 +461,6 @@ class DebloaterGUI:
             self.batch_frame.pack_forget()
             self.single_frame.pack(fill=tk.X)
     
-    def on_abstract_toggle(self):
-        """Handle abstract interpreter toggle."""
-        enabled = self.abstract_interp_var.get()
-        
-        # Enable/disable domain selection
-        if enabled:
-            self.domain_combo.config(state="readonly")
-            self.domain_info.config(foreground="gray")
-        else:
-            self.domain_combo.config(state="disabled")
-            self.domain_info.config(foreground="lightgray")
     
     def log(self, message, level="INFO"):
         """Add a message to the log tab."""
@@ -686,12 +650,8 @@ class DebloaterGUI:
         item = selection[0]
         item_text = self.profiling_tree.item(item, 'text')
         
-        # Check if this is a method item (has icon prefix)
-        if not any(icon in item_text for icon in ['⚠️', '🔶', '✅']):
-            return
-        
-        # Extract method name from item text (remove icon)
-        method_short_name = item_text.replace('⚠️', '').replace('🔶', '').replace('✅', '').strip()
+        # Extract method name from item text
+        method_short_name = item_text.strip()
         
         # Find the full method name in our data
         full_method_name = None
@@ -784,7 +744,6 @@ class DebloaterGUI:
             
             # Update UI
             self.analyze_btn.config(state='disabled')
-            self.progress.start()
             self.update_status("Analyzing...")
             
             # Parse class name
@@ -804,12 +763,11 @@ class DebloaterGUI:
             
             # Create debloater with custom logging and settings
             enable_abstract = self.abstract_interp_var.get()
-            domain = self.domain_var.get()
             enable_profiling = self.dynamic_profiling_var.get()
             self.debloater = DebloaterWithGUILogging(
                 self.suite, self, 
                 enable_abstract_interpreter=enable_abstract,
-                abstract_domain=domain,
+                abstract_domain="product",  # Always use product domain
                 enable_dynamic_profiling=enable_profiling
             )
             
@@ -829,7 +787,6 @@ class DebloaterGUI:
             self.log(traceback.format_exc(), "ERROR")
         
         finally:
-            self.progress.stop()
             self.analyze_btn.config(state='normal')
     
     def run_batch_analysis(self):
@@ -851,16 +808,14 @@ class DebloaterGUI:
             
             # Update UI
             self.analyze_btn.config(state='disabled')
-            self.progress.start()
             self.update_status("Finding Java files...")
             
             # Create batch debloater with settings
             enable_abstract = self.abstract_interp_var.get()
-            domain = self.domain_var.get()
             batch_debloater = BatchDebloaterWithGUILogging(
                 self.suite, self,
                 enable_abstract_interpreter=enable_abstract,
-                abstract_domain=domain
+                abstract_domain="product"  # Always use product domain
             )
             
             self.log(f"Scanning directory: {directory}")
@@ -891,7 +846,6 @@ class DebloaterGUI:
             self.log(traceback.format_exc(), "ERROR")
         
         finally:
-            self.progress.stop()
             self.analyze_btn.config(state='normal')
     
     def display_results(self):
@@ -956,7 +910,7 @@ class DebloaterGUI:
             
             # Add file as top-level parent
             verified = sum(1 for s in combined.suggestions if s.get('source') == 'both')
-            file_id = tree.insert("", "end", text=f"📄 {file_name}",
+            file_id = tree.insert("", "end", text=file_name,
                                  values=("", f"{combined.total_dead_lines} dead lines", 
                                        f"Verified: {verified}"))
             
@@ -968,14 +922,7 @@ class DebloaterGUI:
                 suggestions = combined.by_line[line]
                 
                 for sugg in suggestions:
-                    if sugg['source'] == 'both':
-                        icon = "✅"
-                    elif sugg['source'] == 'source_analysis':
-                        icon = "📝"
-                    else:
-                        icon = "🔍"
-                    
-                    child_id = tree.insert(file_id, "end", text=icon,
+                    child_id = tree.insert(file_id, "end", text="",
                                           values=(line, sugg['type'], sugg['message']))
                     # Store parent file mapping for children too
                     self.batch_file_map[child_id] = (Path(file_path), combined)
@@ -987,7 +934,7 @@ class DebloaterGUI:
         
         # Add errors if any
         if batch_result.errors_by_file:
-            error_id = tree.insert("", "end", text="❌ Errors",
+            error_id = tree.insert("", "end", text="Errors",
                                   values=("", f"{len(batch_result.errors_by_file)} files", ""))
             for file_path, error in batch_result.errors_by_file.items():
                 file_name = Path(file_path).name
@@ -1008,13 +955,7 @@ class DebloaterGUI:
             
             # Add suggestions as children
             for sugg in suggestions:
-                if sugg['source'] == 'both':
-                    icon = "✅"  # Both pipelines verified
-                elif sugg['source'] == 'source_analysis':
-                    icon = "📝"
-                else:
-                    icon = "🔍"
-                tree.insert(line_id, "end", text=icon,
+                tree.insert(line_id, "end", text="",
                           values=(line, sugg['type'], sugg['message']))
     
     def populate_source_tree(self, source_result):
@@ -1022,7 +963,7 @@ class DebloaterGUI:
         tree = self.source_tree
         
         for finding in source_result.findings:
-            tree.insert("", "end", text="📝",
+            tree.insert("", "end", text="",
                        values=(finding.line, finding.kind, finding.message))
     
     def populate_bytecode_tree(self, bytecode_result):
@@ -1034,7 +975,7 @@ class DebloaterGUI:
             unreachable_id = tree.insert("", "end", text="Unreachable Methods",
                                         values=("", "", f"{len(bytecode_result.unreachable_methods)} methods"))
             for method in sorted(bytecode_result.unreachable_methods):
-                tree.insert(unreachable_id, "end", text="🔍",
+                tree.insert(unreachable_id, "end", text="",
                            values=("", "unreachable", method))
         
         # Add dead instructions by method
@@ -1042,7 +983,7 @@ class DebloaterGUI:
             method_id = tree.insert("", "end", text=method,
                                    values=("", "dead_instructions", f"{len(offsets)} offsets"))
             for offset in sorted(offsets):
-                tree.insert(method_id, "end", text="🔍",
+                tree.insert(method_id, "end", text="",
                            values=("", "dead_code", f"offset {offset}"))
     
     def populate_profiling_tree(self, profiling_result):
@@ -1075,14 +1016,6 @@ class DebloaterGUI:
         profiles_by_coverage.sort()  # Low coverage first
         
         for coverage_pct, name, profile in profiles_by_coverage:
-            # Format coverage with color indicator
-            if coverage_pct < 50:
-                icon = "⚠️"
-            elif coverage_pct < 80:
-                icon = "🔶"
-            else:
-                icon = "✅"
-            
             # Get coverage stats
             executed = len(profile.coverage.executed_indices)
             uncovered_indices = profile.coverage.get_uncovered_indices()
@@ -1108,7 +1041,7 @@ class DebloaterGUI:
             short_name = name.split(".")[-1] if "." in name else name
             
             # Add method row
-            method_id = tree.insert("", "end", text=f"{icon} {short_name}",
+            method_id = tree.insert("", "end", text=short_name,
                                    values=(f"{coverage_pct:.0f}%", 
                                           str(executed), 
                                           str(not_executed),
@@ -1128,14 +1061,14 @@ class DebloaterGUI:
                         uncovered_lines.add(line_num)
                 
                 if uncovered_lines:
-                    not_exec_id = tree.insert(method_id, "end", text="📍 Uncovered lines:",
+                    not_exec_id = tree.insert(method_id, "end", text="Uncovered lines:",
                                              values=("", "", "", ""))
                     lines_str = ", ".join(str(ln) for ln in sorted(uncovered_lines))
                     tree.insert(not_exec_id, "end", text="",
                                values=("", "", "", f"Lines: {lines_str}"))
                 else:
                     # Fallback to showing indices if no line mapping
-                    not_exec_id = tree.insert(method_id, "end", text="📍 Uncovered indices:",
+                    not_exec_id = tree.insert(method_id, "end", text="Uncovered indices:",
                                              values=("", "", "", ""))
                     indices_str = ", ".join(str(i) for i in sorted(list(uncovered_indices)[:20]))
                     if len(uncovered_indices) > 20:
@@ -1145,7 +1078,7 @@ class DebloaterGUI:
             
             # Add children for value ranges if any
             if profile.local_ranges:
-                ranges_id = tree.insert(method_id, "end", text="📊 Value ranges:",
+                ranges_id = tree.insert(method_id, "end", text="Value ranges:",
                                        values=("", "", "", ""))
                 for idx, range_data in profile.local_ranges.items():
                     if range_data.min_value is not None:
@@ -1229,7 +1162,7 @@ class DebloaterWithGUILogging(Debloater):
         # Run dynamic profiling if enabled
         if self.enable_dynamic_profiling:
             self.gui.log("\n[Dynamic Profiling] Executing with sample inputs")
-            self.gui.log("  ⚠️ WARNING: Dynamic profiling is UNSOUND for dead code detection!")
+            self.gui.log("  WARNING: Dynamic profiling is UNSOUND for dead code detection!")
             self.gui.update_status("Running dynamic profiling...")
             profiling_result = self.run_dynamic_profiling(classname)
             self.results['profiling'] = profiling_result

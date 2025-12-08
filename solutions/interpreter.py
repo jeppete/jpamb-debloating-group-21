@@ -148,11 +148,9 @@ def step(state: State) -> State | str:
             frame.pc += 1
             return state
         case jvm.Load(type=jvm.Reference(), index=i):
-            # Load reference from local variable
             if i in frame.locals:
                 frame.stack.push(frame.locals[i])
             else:
-                # Push null reference if not initialized
                 frame.stack.push(jvm.Value(jvm.Reference(), None))
             frame.pc += 1
             return state
@@ -183,12 +181,9 @@ def step(state: State) -> State | str:
             frame.pc += 1
             return state
         case jvm.Get(static=True, field=field):
-            # For static field access, particularly $assertionsDisabled
             if field.extension.name == "$assertionsDisabled":
-                # Java assertions are typically disabled, so return false
                 frame.stack.push(jvm.Value.boolean(False))
             else:
-                # Default to zero/false for other static fields
                 if isinstance(field.extension.type, jvm.Boolean):
                     frame.stack.push(jvm.Value.boolean(False))
                 elif isinstance(field.extension.type, jvm.Int):
@@ -256,45 +251,37 @@ def step(state: State) -> State | str:
                 frame.pc += 1
                 return state
         case jvm.Store(type=jvm.Int(), index=i):
-            # Store integer to local variable
             v = frame.stack.pop()
             frame.locals[i] = v
             frame.pc += 1
             return state
         case jvm.Store(type=jvm.Reference(), index=i):
-            # Store reference to local variable
             v = frame.stack.pop()
             frame.locals[i] = v
             frame.pc += 1
             return state
         case jvm.NewArray(type=array_type, dim=1):
-            # Create 1D array - pop size from stack
             size_val = frame.stack.pop()
             if size_val.value < 0:
                 return "negative array size"
-            # Create array reference and push to stack
             array_ref = jvm.Value(jvm.Reference(), f"array_{id(frame)}_{frame.pc.offset}")
             frame.stack.push(array_ref)
             frame.pc += 1
             return state
         case jvm.ArrayLength():
-            # Get array length - for simplicity, return a default value
             array_ref = frame.stack.pop()
             if array_ref.value is None:
                 return "null pointer"
-            # Return a default length for testing
             frame.stack.push(jvm.Value.int(10))
             frame.pc += 1
             return state
         case jvm.ArrayLoad(type=array_element_type):
-            # Load from array - pop index and array reference
             index_val = frame.stack.pop()
             array_ref = frame.stack.pop()
             if array_ref.value is None:
                 return "null pointer"
             if index_val.value < 0:
                 return "array index out of bounds"
-            # For simplicity, return a default value based on type
             if isinstance(array_element_type, jvm.Int):
                 frame.stack.push(jvm.Value.int(42))
             elif isinstance(array_element_type, jvm.Reference):
@@ -304,7 +291,6 @@ def step(state: State) -> State | str:
             frame.pc += 1
             return state
         case jvm.ArrayStore(type=array_element_type):
-            # Store to array - pop value, index, and array reference
             value_val = frame.stack.pop()
             index_val = frame.stack.pop()
             array_ref = frame.stack.pop()
@@ -312,11 +298,9 @@ def step(state: State) -> State | str:
                 return "null pointer"
             if index_val.value < 0:
                 return "array index out of bounds"
-            # For testing, we just consume the values without storing
             frame.pc += 1
             return state
         case jvm.If(condition=condition, target=target):
-            # Compare two values on the stack
             v2, v1 = frame.stack.pop(), frame.stack.pop()
             conditions = {
                 "eq": lambda v1, v2: v1 == v2,
@@ -483,10 +467,8 @@ def execute(method: jvm.AbsMethodID, inputs=None, coverage=None, tracer=None, tr
     result = None
     for x in range(1000):
         if tracer:
-            # Record current local variables
             current_frame = state.frames.peek()
             for idx, value in current_frame.locals.items():
-                # Track both integers and booleans
                 if isinstance(value.value, (int, bool)):
                     tracer.observe_local(idx, value.value)
         
@@ -494,11 +476,9 @@ def execute(method: jvm.AbsMethodID, inputs=None, coverage=None, tracer=None, tr
             current_frame = state.frames.peek()
             coverage.visit(current_frame.pc.offset)
             
-            # Check for branch instructions
             opr = bc[current_frame.pc]
             if isinstance(opr, (jvm.Ifz, jvm.If)):
                 try:
-                    # We need to determine if branch will be taken before stepping
                     if isinstance(opr, jvm.Ifz) and current_frame.stack:
                         v = current_frame.stack.peek()
                         taken = ifz_conditions[opr.condition](v.value)
@@ -509,7 +489,6 @@ def execute(method: jvm.AbsMethodID, inputs=None, coverage=None, tracer=None, tr
                         taken = if_conditions[opr.condition](v1.value, v2.value)
                         coverage.branch(current_frame.pc.offset, taken)
                 except (IndexError, AttributeError, KeyError):
-                    # Skip branch recording if we can't access the stack properly
                     pass
         
         state = step(state)
@@ -519,15 +498,12 @@ def execute(method: jvm.AbsMethodID, inputs=None, coverage=None, tracer=None, tr
     else:
         result = "*"
     
-    # Write trace file if tracing is enabled
     if (coverage or tracer) and trace_dir:
         os.makedirs(trace_dir, exist_ok=True)
         
-        # Finalize tracer if present
         if tracer:
             tracer.finalize()
         
-        # Generate trace data
         trace_data = {
             "method": f"{method.classname}.{method.extension.encode()}"
         }
@@ -538,9 +514,6 @@ def execute(method: jvm.AbsMethodID, inputs=None, coverage=None, tracer=None, tr
         if tracer:
             trace_data["values"] = tracer.to_dict()
         
-        # Write JSON file
-
-        # Create a safe filename using method encoding
         method_encoded = method.extension.encode().replace('(', '').replace(')', '').replace(':', '_').replace('/', '_')
         filename = f"{method.classname}_{method_encoded}.json"
         filepath = Path(trace_dir) / filename
@@ -726,10 +699,7 @@ class TraceRefiner:
         if total == 0:
             return 0.5
         
-        # Higher confidence with better coverage
         coverage_ratio = executed / total
-        
-        # Boost confidence if we have branch information
         branch_boost = 0.1 if coverage["branches"] else 0.0
         
         return min(0.95, coverage_ratio + branch_boost)

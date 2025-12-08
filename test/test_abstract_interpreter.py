@@ -1,20 +1,9 @@
-"""
-Test suite for IAI (Implement Abstract Interpreter) component.
-
-Tests the abstract interpreter implementation including:
-- Bounded and unbounded abstract interpretation
-- Integration with ISY MethodIR/CFG
-- Unreachable PC computation
-- Integration with NAN refinement (ReducedProductState.from_samples())
-
-DTU 02242 Program Analysis - Group 21
-"""
+"""Test suite for IAI (Implement Abstract Interpreter) component."""
 
 import pytest
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from jpamb import jvm

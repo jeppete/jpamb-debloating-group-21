@@ -1,24 +1,10 @@
-"""
-NAN Evaluation Script - Demonstrates dynamic refinement improves static analysis.
-
-This script shows that using dynamic traces (IIN) to refine initial abstract states
-leads to MORE precise static analysis (proves MORE code unreachable).
-
-DTU 02242 Program Analysis - Group 21
-NAN (Integrate Analyses) - 10 points
-
-Course Requirement:
-    "Use the result of ONE analysis (dynamic/IIN) to improve ANOTHER analysis (static/IAI)"
-    "The improvement must be visible: static analysis with dynamic refinement must prove 
-     MORE code unreachable than static alone"
-"""
+"""NAN Evaluation Script - Demonstrates dynamic refinement improves static analysis."""
 
 import sys
 from pathlib import Path
 from typing import Dict, Tuple, List
 import json
 
-# Add project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from jpamb import jvm
@@ -35,18 +21,8 @@ from solutions.nab_integration import (
 )
 
 
-# =============================================================================
-# NAN EVALUATION: Compare static analysis WITH vs WITHOUT dynamic refinement
-# =============================================================================
-
 def analyze_without_refinement(suite: Suite, method: jvm.AbsMethodID) -> Tuple[set, set]:
-    """
-    Static analysis WITHOUT dynamic refinement (init = TOP).
-    
-    Returns:
-        (unreachable_pcs, all_outcomes)
-    """
-    # Initial state = TOP (no information from dynamic traces)
+    """Static analysis without dynamic refinement (init = TOP)."""
     outcomes, visited_pcs = unbounded_abstract_run(suite, method, init_locals=None)
     unreachable = get_unreachable_pcs(suite, method, init_locals=None)
     return unreachable, outcomes
@@ -57,23 +33,14 @@ def analyze_with_refinement(
     method: jvm.AbsMethodID, 
     init_locals: Dict[int, SignSet]
 ) -> Tuple[set, set]:
-    """
-    Static analysis WITH dynamic refinement (init from IIN traces).
-    
-    Returns:
-        (unreachable_pcs, all_outcomes)
-    """
+    """Static analysis with dynamic refinement (init from IIN traces)."""
     outcomes, visited_pcs = unbounded_abstract_run(suite, method, init_locals=init_locals)
     unreachable = get_unreachable_pcs(suite, method, init_locals=init_locals)
     return unreachable, outcomes
 
 
 def get_refined_init_from_trace(trace_path: Path) -> Dict[int, SignSet]:
-    """
-    Extract refined initial state from IIN trace file.
-    
-    This is the NAN integration: IIN trace → ReducedProductState → SignSet for IAI
-    """
+    """Extract refined initial state from IIN trace file."""
     if not trace_path.exists():
         return {}
     
@@ -92,11 +59,7 @@ def get_refined_init_from_trace(trace_path: Path) -> Dict[int, SignSet]:
 
 
 def get_refined_init_from_samples(samples_by_local: Dict[int, List[int]]) -> Dict[int, SignSet]:
-    """
-    Create refined initial state from sample values (simulating IIN traces).
-    
-    This demonstrates NAN: dynamic observations → refined abstract state
-    """
+    """Create refined initial state from sample values."""
     init_locals = {}
     for local_idx, samples in samples_by_local.items():
         if samples:

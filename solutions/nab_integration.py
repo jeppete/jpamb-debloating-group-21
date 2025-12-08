@@ -1,25 +1,7 @@
 """
 NAB Integration Module - Integrates IIN traces with abstract domains.
 
-This module provides the core integration between dynamic execution traces
-produced by IIN (Interpreter) and the abstract domains defined for static
-analysis. It implements the dynamic refinement heuristic that uses
-observed concrete values to set initial abstract states for static analysis.
-
-**Course Definition (02242):**
-"Run two or more abstractions at the same time, letting them inform each other
-during execution" (formula: 5 per abstraction after the first).
-
-This module implements a **Reduced Product** of SignSet and IntervalDomain,
-where both abstractions run in parallel and mutually refine each other:
-- Sign "+" tightens interval low bound to max(low, 1)
-- Sign "-" tightens interval high bound to min(high, -1)
-- Sign "0" constrains interval to [0, 0]
-- Interval [a, b] where a > 0 refines sign to "+"
-- Interval [a, b] where b < 0 refines sign to "-"
-- etc.
-
-DTU 02242 Program Analysis - Group 21
+Implements Reduced Product of SignSet and IntervalDomain with mutual refinement.
 """
 
 import json
@@ -27,7 +9,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 
-# Import from abstract_domain module
 from solutions.components.abstract_domain import (
     SignSet,
     IntervalDomain,
@@ -35,8 +16,6 @@ from solutions.components.abstract_domain import (
     NonNullDomain,
 )
 
-
-# --- Helper functions for SignSet sign categories ---
 
 def signset_is_positive(s: SignSet) -> bool:
     """Check if SignSet represents strictly positive values."""
@@ -62,8 +41,6 @@ def signset_is_non_zero(s: SignSet) -> bool:
     """Check if SignSet represents non-zero values."""
     return s.signs == frozenset({"+", "-"})
 
-
-# --- Named SignSet constructors for clarity ---
 
 def sign_positive() -> SignSet:
     """Create SignSet for strictly positive values."""
@@ -133,32 +110,7 @@ class AbstractValue:
 
 @dataclass
 class ReducedProductState:
-    """
-    Reduced Product of SignSet, IntervalDomain, and NonNullDomain.
-    
-    This implements the course definition for NAB (Integrate Abstractions):
-    "Run two or more abstractions at the same time, letting them inform each other
-    during execution" (formula: 5 per abstraction after the first).
-    
-    The reduced product maintains sign, interval, AND nonnull abstractions in parallel,
-    with mutual refinement to tighten all domains using information from each other.
-    
-    The NonNullDomain is a NOVEL abstraction NOT taught in DTU 02242 lectures
-    (Sign, Interval, Constant, Parity are taught), qualifying for IAB points.
-    
-    Key refinement rules:
-    - sign={+} + interval=[a,b] → interval=[max(a,1), b]
-    - sign={-} + interval=[a,b] → interval=[a, min(b,-1)]
-    - sign={0} + interval=[a,b] → interval=[0,0]
-    - interval=[a,b] where a>0 → sign={+}
-    - interval=[a,b] where b<0 → sign={-}
-    - interval=[0,0] → sign={0}
-    - nonnull=DEFINITELY_NON_NULL + is_reference → array length ≥ 0
-    
-    Dead Code Detection (IAB):
-    - If nonnull=DEFINITELY_NON_NULL, ifnull branch is DEAD (unreachable)
-    - If nonnull=MAYBE_NULL at ifnonnull, both branches are possible
-    """
+    """Reduced Product of SignSet, IntervalDomain, and NonNullDomain with mutual refinement."""
     sign: SignSet
     interval: IntervalDomain
     nonnull: NonNullDomain = field(default_factory=NonNullDomain.top)
@@ -166,27 +118,18 @@ class ReducedProductState:
     _refinement_history: List[str] = field(default_factory=list)
     
     def __post_init__(self):
-        """Apply initial mutual refinement after construction."""
         if not hasattr(self, '_refinement_history') or self._refinement_history is None:
             self._refinement_history = []
     
     @classmethod
     def from_samples(cls, samples: List[int]) -> 'ReducedProductState':
-        """
-        Create a reduced product state from concrete samples (for integers).
-        
-        Args:
-            samples: List of concrete integer values
-            
-        Returns:
-            ReducedProductState with mutually refined sign and interval
-        """
+        """Create reduced product state from concrete integer samples."""
         sign = signset_from_samples(samples)
         interval = IntervalDomain.abstract(samples)
         state = cls(
             sign=sign,
             interval=interval,
-            nonnull=NonNullDomain.top(),  # N/A for integers
+            nonnull=NonNullDomain.top(),
             is_reference=False,
             _refinement_history=[]
         )
@@ -195,11 +138,7 @@ class ReducedProductState:
     
     @classmethod
     def for_integer(cls, samples: Optional[List[int]] = None) -> 'ReducedProductState':
-        """
-        Create state for an integer value (not a reference).
-        
-        For primitives, nonnull is not applicable (use TOP).
-        """
+        """Create state for an integer value."""
         if samples:
             sign = signset_from_samples(samples)
             interval = IntervalDomain.abstract(samples)
@@ -224,14 +163,7 @@ class ReducedProductState:
         is_array: bool = False,
         length_samples: Optional[List[int]] = None
     ) -> 'ReducedProductState':
-        """
-        Create state for a reference value.
-        
-        Args:
-            nonnull: Nullness status (default: TOP)
-            is_array: True if this is an array reference
-            length_samples: If array, concrete length samples for interval
-        """
+        """Create state for a reference value."""
         if nonnull is None:
             nonnull = NonNullDomain.top()
         
@@ -239,7 +171,6 @@ class ReducedProductState:
             sign = signset_from_samples(length_samples)
             interval = IntervalDomain.abstract(length_samples)
         else:
-            # Array lengths are non-negative
             sign = sign_non_negative() if is_array else SignSet.top()
             interval = IntervalDomain.range(0, None) if is_array else IntervalDomain.top()
         
@@ -255,11 +186,7 @@ class ReducedProductState:
     
     @classmethod
     def from_new(cls) -> 'ReducedProductState':
-        """
-        Create state for result of 'new' instruction.
-        
-        A newly created object is DEFINITELY_NON_NULL.
-        """
+        """Create state for result of 'new' instruction (DEFINITELY_NON_NULL)."""
         return cls(
             sign=SignSet.top(),
             interval=IntervalDomain.top(),
@@ -270,12 +197,7 @@ class ReducedProductState:
     
     @classmethod
     def from_newarray(cls, length: Optional[SignSet] = None) -> 'ReducedProductState':
-        """
-        Create state for result of 'newarray' or 'anewarray' instruction.
-        
-        A newly created array is DEFINITELY_NON_NULL, and length is non-negative.
-        """
-        # Array lengths are always non-negative
+        """Create state for result of 'newarray' (DEFINITELY_NON_NULL, length≥0)."""
         interval = IntervalDomain.range(0, None)
         sign = sign_non_negative()
         
@@ -289,11 +211,7 @@ class ReducedProductState:
     
     @classmethod
     def from_null(cls) -> 'ReducedProductState':
-        """
-        Create state for 'aconst_null' instruction.
-        
-        The null constant is MAYBE_NULL (includes definitely null).
-        """
+        """Create state for 'aconst_null' instruction (MAYBE_NULL)."""
         return cls(
             sign=SignSet.top(),
             interval=IntervalDomain.top(),

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 import tempfile
 
-# Add project root to path so we can import from solutions
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from solutions.interpreter import execute, CoverageTracker, ValueTracer  # noqa: E402
@@ -40,7 +39,6 @@ def test_value_tracer():
     tracer.finalize()
     result = tracer.to_dict()
     
-    # Check local_0 (all positive)
     assert "local_0" in result
     local_0 = result["local_0"]
     assert local_0["sign"] == "positive"
@@ -48,7 +46,6 @@ def test_value_tracer():
     assert local_0["never_negative"] is True
     assert local_0["interval"] == [5, 15]
     
-    # Check local_1 (all negative)
     assert "local_1" in result
     local_1 = result["local_1"]
     assert local_1["sign"] == "negative" 
@@ -83,14 +80,9 @@ def test_value_tracer_zero_only():
     tracer.finalize()
     result = tracer.to_dict()
     
-    # Should have analysis for local_0
     assert "local_0" in result
     local_0 = result["local_0"]
-    
-    # Sign should be zero
     assert local_0["sign"] == "zero"
-    
-    # Same min/max, expect [0, None] per implementation
     assert local_0["interval"] == [0, None]
 
 
@@ -105,26 +97,21 @@ def test_execute_with_tracing():
         
         result = execute(methodid, input_vals, coverage=coverage, tracer=tracer, trace_dir=tmpdir)
         
-        # Check that trace file was created
         trace_files = list(Path(tmpdir).glob("*.json"))
         assert len(trace_files) == 1
         
-        # Load and check trace file content
         with open(trace_files[0]) as f:
             trace_data = json.load(f)
         
         assert "method" in trace_data
         assert "coverage" in trace_data
         assert "values" in trace_data
-        
-        # Check method name format
         assert trace_data["method"].startswith("jpamb.cases.Simple.divideByZero")
 
 
 def test_execute_simple_positive_case():
     """Test a simple case that should show always_positive = true."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Test a method that processes a positive integer
         methodid = jvm.AbsMethodID.decode("jpamb.cases.Simple.justAdd:(II)I")
         input_vals = jpamb.model.Input.decode("(5, 3)")
         
@@ -140,7 +127,6 @@ def test_execute_simple_positive_case():
         with open(trace_files[0]) as f:
             trace_data = json.load(f)
         
-        # Check that we have local variable data
         if "values" in trace_data and trace_data["values"]:
             # Look for any local variable that was always positive
             for local_name, local_data in trace_data["values"].items():
@@ -152,7 +138,6 @@ def test_execute_simple_positive_case():
 def test_branch_coverage_detection():
     """Test that branch instructions are properly detected and recorded."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Use a method that has branches
         methodid = jvm.AbsMethodID.decode("jpamb.cases.Simple.checkBeforeAssert:(I)V")
         input_vals = jpamb.model.Input.decode("(5)")
         
@@ -161,14 +146,8 @@ def test_branch_coverage_detection():
         
         result = execute(methodid, input_vals, coverage=coverage, tracer=tracer, trace_dir=tmpdir)
         
-        # Check coverage data
         coverage_data = coverage.to_dict()
-        
-        # Should have some executed PCs
         assert len(coverage_data["executed_pcs"]) > 0
-        
-        # Should detect branches if the method has conditional logic
-        # (Note: depends on the actual bytecode structure)
 
 
 def test_negative_value_detection():
@@ -201,13 +180,11 @@ def test_interval_calculation():
         try:
             result = execute(methodid, input_vals, coverage=coverage, tracer=tracer, trace_dir=tmpdir)
             
-            # Load trace and check interval data
             trace_files = list(Path(tmpdir).glob("*.json"))
             if trace_files:
                 with open(trace_files[0]) as f:
                     trace_data = json.load(f)
                 
-                # Look for interval data
                 if "values" in trace_data:
                     for local_name, local_data in trace_data["values"].items():
                         if "interval" in local_data:
@@ -216,7 +193,6 @@ def test_interval_calculation():
                             assert len(interval) == 2
                             
         except Exception as e:
-            # Method might not exist, skip gracefully
             pytest.skip(f"Test method not available: {e}")
 
 
@@ -229,19 +205,15 @@ def test_json_file_writing():
         coverage = CoverageTracker(methodid)
         tracer = ValueTracer()
         
-        # Execute with tracing
         result = execute(methodid, input_vals, coverage=coverage, tracer=tracer, trace_dir=tmpdir)
         
-        # Check file exists
         trace_files = list(Path(tmpdir).glob("*.json"))
         assert len(trace_files) == 1
         
-        # Check file is valid JSON
         with open(trace_files[0]) as f:
             data = json.load(f)
             assert isinstance(data, dict)
             
-        # Check file has expected structure
         expected_keys = ["method"]
         for key in expected_keys:
             assert key in data
@@ -252,23 +224,20 @@ def test_multiple_executions_different_inputs():
     with tempfile.TemporaryDirectory() as tmpdir:
         methodid = jvm.AbsMethodID.decode("jpamb.cases.Simple.justAdd:(II)I")
         
-        # Test with positive input
         input1 = jpamb.model.Input.decode("(5, 3)")
         coverage1 = CoverageTracker(methodid)
         tracer1 = ValueTracer()
         
         result1 = execute(methodid, input1, coverage=coverage1, tracer=tracer1, trace_dir=tmpdir)
         
-        # Test with different input  
         input2 = jpamb.model.Input.decode("(-5, -3)")
         coverage2 = CoverageTracker(methodid)
         tracer2 = ValueTracer()
         
         result2 = execute(methodid, input2, coverage=coverage2, tracer=tracer2, trace_dir=tmpdir)
         
-        # Should have created different trace files
         trace_files = list(Path(tmpdir).glob("*.json"))
-        assert len(trace_files) >= 1  # At least one file should exist
+        assert len(trace_files) >= 1
 
 
 def test_trace_directory_creation():
@@ -284,11 +253,9 @@ def test_trace_directory_creation():
         
         result = execute(methodid, input_vals, coverage=coverage, tracer=tracer, trace_dir=str(nonexistent_dir))
         
-        # Check directory was created
         assert nonexistent_dir.exists()
         assert nonexistent_dir.is_dir()
         
-        # Check file was written
         trace_files = list(nonexistent_dir.glob("*.json"))
         assert len(trace_files) == 1
 
@@ -299,10 +266,8 @@ def test_no_tracing_when_tracers_none():
         methodid = jvm.AbsMethodID.decode("jpamb.cases.Simple.divideByZero:()I")
         input_vals = jpamb.model.Input.decode("()")
         
-        # Execute without tracers
         result = execute(methodid, input_vals, coverage=None, tracer=None, trace_dir=tmpdir)
         
-        # Should not create any trace files
         trace_files = list(Path(tmpdir).glob("*.json"))
         assert len(trace_files) == 0
 

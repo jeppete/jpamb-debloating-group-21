@@ -1,16 +1,4 @@
-"""
-solutions/statement_grouper.py
-
-Statement-level grouping of JVM bytecode instructions.
-
-This module groups related bytecode sequences into high-level statements:
-- Assignment statements (load + operation + store)
-- Conditional statements (condition evaluation + branch)
-- Method invocations (argument setup + invoke)
-- Return statements (value preparation + return)
-
-DTU 02242 Program Analysis - Group 21
-"""
+"""Statement-level grouping of JVM bytecode instructions."""
 
 from __future__ import annotations
 
@@ -23,34 +11,14 @@ from solutions.ir import (
 
 
 class StatementGrouper:
-    """
-    Groups bytecode instructions into high-level statements.
-    
-    The grouper analyzes CFG patterns to identify statement boundaries
-    and classify bytecode sequences into logical operations.
-    
-    Grouping strategy:
-    1. Identify statement terminators (store, invoke, return, branch)
-    2. Work backwards to find statement starts
-    3. Classify based on terminator and components
-    
-    Example:
-        grouper = StatementGrouper(cfg, basic_blocks)
-        statements = grouper.group()
-    """
+    """Groups bytecode instructions into high-level statements."""
     
     def __init__(
         self,
         cfg: dict[int, CFGNode],
         basic_blocks: list[BasicBlock] = None
     ):
-        """
-        Initialize statement grouper.
-        
-        Args:
-            cfg: CFG dictionary mapping PC to CFGNode
-            basic_blocks: Optional list of basic blocks for block-level grouping
-        """
+        """Initialize statement grouper."""
         self.cfg = cfg
         self.basic_blocks = basic_blocks or []
         self._pc_list = sorted(cfg.keys())
@@ -58,19 +26,13 @@ class StatementGrouper:
         self._assigned_pcs: set[int] = set()
         
     def group(self) -> list[Statement]:
-        """
-        Group bytecode into statements.
-        
-        Returns:
-            List of Statement objects
-        """
+        """Group bytecode into statements."""
         if not self.cfg:
             return []
         
         self._statements = []
         self._assigned_pcs = set()
         
-        # Process in reverse PC order to find statement boundaries
         for i in range(len(self._pc_list) - 1, -1, -1):
             pc = self._pc_list[i]
             
@@ -84,7 +46,6 @@ class StatementGrouper:
                 self._statements.append(stmt)
                 self._assigned_pcs.update(stmt.pcs)
         
-        # Add remaining unassigned instructions as simple statements
         for pc in self._pc_list:
             if pc not in self._assigned_pcs:
                 node = self.cfg[pc]
@@ -137,19 +98,15 @@ class StatementGrouper:
         if node.node_type == NodeType.INVOKE:
             return self._identify_invoke(index, node)
         
-        # Jump instruction
         if node.node_type == NodeType.JUMP:
             return self._identify_jump(index, node)
         
-        # Switch instruction
         if node.node_type == NodeType.SWITCH:
             return self._identify_switch(index, node)
         
-        # New object/array
         if node.node_type == NodeType.NEW:
             return self._identify_new(index, node)
         
-        # Array store
         if node.node_type == NodeType.ARRAY_ACCESS:
             opcode = node.opcode
             if isinstance(opcode, opc.ArrayStore):
@@ -162,23 +119,17 @@ class StatementGrouper:
         index: int,
         store_node: CFGNode
     ) -> Statement:
-        """
-        Identify an assignment statement ending with store.
-        
-        Pattern: load/push* -> op* -> store
-        """
+        """Identify an assignment statement ending with store."""
         pc = store_node.pc
         pcs = [pc]
         
-        # Track what local is being stored to
         opcode = store_node.opcode
         var_written = set()
         if hasattr(opcode, 'index'):
             var_written.add(opcode.index)
         
-        # Look backwards for contributing instructions
         i = index - 1
-        stack_depth = 1  # Need one value on stack for store
+        stack_depth = 1
         
         var_read = set()
         
@@ -190,18 +141,14 @@ class StatementGrouper:
             
             prev_node = self.cfg[prev_pc]
             
-            # Don't cross basic block boundaries for simple assignments
             if prev_node.is_leader and i != index:
                 break
             
-            # Compute stack effect
             push_count, pop_count = self._stack_effect(prev_node)
             
-            # Include this instruction
             pcs.insert(0, prev_pc)
             stack_depth = stack_depth - push_count + pop_count
             
-            # Track variables read
             if prev_node.node_type == NodeType.LOAD:
                 if hasattr(prev_node.opcode, 'index'):
                     var_read.add(prev_node.opcode.index)
@@ -223,15 +170,10 @@ class StatementGrouper:
         index: int,
         branch_node: CFGNode
     ) -> Statement:
-        """
-        Identify a conditional statement with branch.
-        
-        Pattern: condition_setup* -> if/ifz
-        """
+        """Identify a conditional statement with branch."""
         pc = branch_node.pc
         pcs = [pc]
         
-        # Get branch targets
         target_pcs = []
         opcode = branch_node.opcode
         if hasattr(opcode, 'target'):

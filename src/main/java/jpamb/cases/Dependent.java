@@ -48,7 +48,7 @@ public class Dependent {
   @Case("(0) -> ok")
   @Case("(1) -> ok")
   public static void divisionLoop(int n) {
-    for (int i = 0; i < 5; i++) { // 1024 / 2^5 = 32
+    for (int i = 0; i < 5; i++) {
       n /= 2;
     }
     assert n != 32;

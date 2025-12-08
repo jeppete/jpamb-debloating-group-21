@@ -146,9 +146,7 @@ class Debloater:
         log.info("DEBLOATER ANALYSIS: %s", classname)
         log.info("="*70)
         
-        # ===================================================================
-        # PIPELINE 1: Source Analysis (if source file provided)
-        # ===================================================================
+        # Pipeline 1: Source Analysis
         if source_file and source_file.exists():
             log.info("\n[Pipeline 1] Source Analysis")
             source_result = self.run_source_pipeline(source_file)
@@ -157,23 +155,18 @@ class Debloater:
             log.info("\n[Pipeline 1] Source Analysis: Skipped (no source file)")
             self.results['source'] = SourceAnalysisResult()
         
-        # ===================================================================
-        # PIPELINE 2: Bytecode Analysis (multi-phase, optimized)
-        # ===================================================================
+        # Pipeline 2: Bytecode Analysis
         log.info("\n[Pipeline 2] Bytecode Analysis")
         bytecode_result = self.run_bytecode_pipeline(classname)
         self.results['bytecode'] = bytecode_result
         
-        # ===================================================================
-        # OPTIONAL: Dynamic Profiling (UNSOUND - hints only!)
-        # ===================================================================
+        # Optional: Dynamic Profiling (UNSOUND - hints only)
         if self.enable_dynamic_profiling and DYNAMIC_PROFILER_AVAILABLE:
             log.info("\n[Dynamic Profiling] Executing with sample inputs (HINTS ONLY)")
-            log.info("  ⚠️  WARNING: Dynamic profiling is UNSOUND for dead code detection!")
+            log.info("  WARNING: Dynamic profiling is UNSOUND for dead code detection!")
             profiling_result = self.run_dynamic_profiling(classname)
             self.results['profiling'] = profiling_result
             
-            # Log summary
             if profiling_result:
                 avg_coverage = profiling_result._get_average_coverage()
                 log.info(f"  Profiled {len(profiling_result.method_profiles)} methods")
@@ -182,9 +175,7 @@ class Debloater:
         elif self.enable_dynamic_profiling and not DYNAMIC_PROFILER_AVAILABLE:
             log.warning("\n[Dynamic Profiling] DISABLED - module not available")
         
-        # ===================================================================
-        # VERIFICATION: Check suspected unused imports with bytecode
-        # ===================================================================
+        # Verify unused imports with bytecode
         if source_result.suspected_unused_imports:
             log.info("\n[Verification] Checking unused imports with bytecode")
             confirmed_unused = self.verify_unused_imports_with_bytecode(
@@ -192,7 +183,6 @@ class Debloater:
                 source_result.suspected_unused_imports
             )
             
-            # Add confirmed unused imports as findings
             for import_path, line_num in source_result.suspected_unused_imports.items():
                 if import_path in confirmed_unused:
                     class_name = import_path.split("/")[-1]
@@ -201,23 +191,19 @@ class Debloater:
                         kind="unused_import",
                         message=f"Import '{class_name}' is never used (verified by bytecode); candidate for removal.",
                         confidence="high",
-                        verified_by_bytecode=True,  # Mark as verified!
+                        verified_by_bytecode=True,
                         import_path=import_path
                     )
-                    log.info(f"  ✓ Confirmed unused: {import_path}")
+                    log.info(f"  Confirmed unused: {import_path}")
                 else:
-                    log.info(f"  ✗ Actually used: {import_path} (found in bytecode)")
+                    log.info(f"  Actually used: {import_path} (found in bytecode)")
         
-        # ===================================================================
-        # MAPPING: Bytecode offsets → Source lines
-        # ===================================================================
+        # Map bytecode offsets to source lines
         log.info("\n[Mapping] Bytecode results to source level")
         mapped_bytecode = self.map_bytecode_to_source(classname, bytecode_result)
         self.results['bytecode_mapped'] = mapped_bytecode
         
-        # ===================================================================
-        # COMBINE: Merge and deduplicate results
-        # ===================================================================
+        # Combine results
         log.info("\n[Combine] Merging results from both pipelines")
         combined = self.combine_results(
             self.results['source'],
@@ -225,9 +211,6 @@ class Debloater:
         )
         self.results['combined'] = combined
         
-        # ===================================================================
-        # REPORT: Present findings
-        # ===================================================================
         if verbose:
             self.report()
     
@@ -238,7 +221,6 @@ class Debloater:
                 lines = f.readlines()
                 if 0 <= line_num - 1 < len(lines):
                     line = lines[line_num - 1]
-                    # Parse: import java.util.HashMap; -> java/util/HashMap
                     line = line.replace("import", "").replace(";", "").strip()
                     if line.startswith("static"):
                         line = line.replace("static", "").strip()
@@ -408,7 +390,7 @@ class Debloater:
         Returns:
             BytecodeResult with all findings
         """
-        # Phase 1: Bytecode Syntactic Analysis
+        # Phase 1: CFG + Call Graph Analysis
         log.info("  Phase 1: CFG + Call Graph Analysis")
         bytecode_analyzer = BytecodeAnalyzer(self.suite)
         
@@ -421,7 +403,7 @@ class Debloater:
             log.error("  Bytecode analysis failed: %s", e)
             raise
         
-        # Phase 2: Abstract Interpretation (optional)
+        # Phase 2: Abstract Interpretation
         if self.enable_abstract_interpreter:
             domain_names = {
                 "sign": "SignSet",
@@ -449,10 +431,6 @@ class Debloater:
         else:
             log.info("  Phase 2: Abstract Interpretation (DISABLED)")
         
-        # Phase 3: Data Flow Analysis (TODO)
-        # log.info("  Phase 3: Data Flow Analysis")
-        # ...
-        
         return result
     
     def run_abstract_interpretation(self, classname: jvm.ClassName, 
@@ -460,11 +438,7 @@ class Debloater:
         """
         Run abstract interpretation on all methods to find dead code.
         
-        Uses ProductDomain (IntervalDomain + NonNullDomain) for maximum precision:
-        - Dead branches from constant comparisons (if x > 10; if x < 5)
-        - Dead branches from value propagation (x = 15; if x < 10)
-        - Dead null checks after 'new' (obj = new X(); if (obj == null))
-        - Dead code after contradictory conditions
+        Uses ProductDomain (IntervalDomain + NonNullDomain) for maximum precision.
         
         Args:
             classname: Class to analyze
@@ -627,7 +601,6 @@ class Debloater:
                 line_table = code.get("lines", [])
                 
                 # Build byte_offset → instruction_index mapping
-                # The line table uses instruction indices, not byte offsets!
                 offset_to_index = {}
                 for idx, inst in enumerate(bytecode):
                     byte_offset = inst.get("offset", -1)
@@ -635,7 +608,6 @@ class Debloater:
                         offset_to_index[byte_offset] = idx
                 
                 for offset in dead_offsets:
-                    # Convert byte offset to instruction index for line table lookup
                     inst_index = offset_to_index.get(offset)
                     if inst_index is not None:
                         line_num = self.index_to_line(inst_index, line_table)
@@ -658,15 +630,12 @@ class Debloater:
                 full_name = f"{classname}.{method_name}"
                 
                 if full_name in bytecode_result.unreachable_methods:
-                    # Get method's starting line (first entry in line table)
                     code = method_dict.get("code", {})
                     line_table = code.get("lines", [])
                     bytecode = code.get("bytecode", [])
                     if line_table:
                         method_line = line_table[0].get("line")
-                        # The "offset" in line_table is actually an instruction index
                         first_inst_index = line_table[0].get("offset", 0)
-                        # Get the actual byte offset from the bytecode array
                         method_offset = 0
                         if bytecode and first_inst_index < len(bytecode):
                             method_offset = bytecode[first_inst_index].get("offset", 0)
@@ -688,23 +657,9 @@ class Debloater:
         return mapped
     
     def index_to_line(self, inst_index: int, line_table: List[dict]) -> Optional[int]:
-        """
-        Convert instruction index to source line number.
-        
-        NOTE: The line_table "offset" field is actually an instruction INDEX
-        (0-based position in the bytecode list), not a byte offset!
-        
-        Args:
-            inst_index: Instruction index (position in bytecode array)
-            line_table: Line number table from bytecode (entries have "line" and "offset"
-                        where "offset" is actually an instruction index)
-            
-        Returns:
-            Source line number, or None if not found
-        """
+        """Convert instruction index to source line number."""
         best_line = None
         for entry in line_table:
-            # "offset" in line_table is actually an instruction index
             entry_index = entry.get("offset", -1)
             if entry_index <= inst_index:
                 best_line = entry.get("line")
@@ -728,17 +683,14 @@ class Debloater:
         """
         combined = CombinedResult()
         
-        # Build temporary mapping to detect overlaps
-        source_lines = {}  # line -> list of findings
-        bytecode_lines = {}  # line -> list of findings
+        source_lines = {}
+        bytecode_lines = {}
         
-        # Collect source findings by line
         for finding in source_result.findings:
             line = finding.line
             if line not in source_lines:
                 source_lines[line] = []
             
-            # Mark source as 'both' if verified by bytecode
             source_type = 'both' if finding.verified_by_bytecode else 'source_analysis'
             
             source_lines[line].append({
@@ -751,17 +703,13 @@ class Debloater:
                 'details': finding.details
             })
         
-        # Collect bytecode findings by line
         for detail in bytecode_mapped.details:
             line = detail['line']
             if line not in bytecode_lines:
                 bytecode_lines[line] = []
             
             # Format message based on available info
-            if 'offset' in detail:
-                msg = f"{detail['method']}: offset {detail['offset']}"
-            else:
-                msg = f"{detail['method']}"
+            msg = f"{detail['method']}: offset {detail['offset']}" if 'offset' in detail else f"{detail['method']}"
             
             bytecode_lines[line].append({
                 'line': line,
@@ -771,42 +719,33 @@ class Debloater:
                 'details': detail
             })
         
-        # Merge and detect overlaps
         all_lines = set(source_lines.keys()) | set(bytecode_lines.keys())
         
         for line in sorted(all_lines):
             has_source = line in source_lines
             has_bytecode = line in bytecode_lines
             
-            # Check if source findings are already verified by bytecode
             already_verified = False
             if has_source:
                 already_verified = any(f.get('verified_by_bytecode', False) for f in source_lines[line])
             
             if already_verified:
-                # Source finding already verified by bytecode (e.g., unused import)
-                # Just add the source findings as-is (they're already marked as 'both')
                 for finding in source_lines[line]:
                     combined.suggestions.append(finding)
                     if line not in combined.by_line:
                         combined.by_line[line] = []
                     combined.by_line[line].append(finding)
                 
-                # Also add bytecode findings if they exist (but as separate items)
                 if has_bytecode:
                     for finding in bytecode_lines[line]:
-                        # Mark these as supplementary
                         finding['supplementary'] = True
                         combined.suggestions.append(finding)
                         combined.by_line[line].append(finding)
             
             elif has_source and has_bytecode:
-                # BOTH pipelines found dead code on this line (and not pre-verified)
-                # Merge into single high-confidence finding
                 source_msgs = [f['message'] for f in source_lines[line]]
                 bytecode_msgs = [f['message'] for f in bytecode_lines[line]]
                 
-                # Create combined finding
                 suggestion = {
                     'line': line,
                     'type': 'dead_code_verified',
@@ -824,15 +763,13 @@ class Debloater:
                 combined.by_line[line] = [suggestion]
                 
             elif has_source:
-                # Source only
                 for finding in source_lines[line]:
                     combined.suggestions.append(finding)
                     if line not in combined.by_line:
                         combined.by_line[line] = []
                     combined.by_line[line].append(finding)
             
-            else:  # has_bytecode
-                # Bytecode only
+            else:
                 for finding in bytecode_lines[line]:
                     combined.suggestions.append(finding)
                     if line not in combined.by_line:
@@ -841,7 +778,6 @@ class Debloater:
         
         combined.total_dead_lines = len(combined.by_line)
         
-        # Count by source
         both_count = sum(1 for s in combined.suggestions if s.get('source') == 'both')
         source_only = sum(1 for s in combined.suggestions if s.get('source') == 'source_analysis')
         bytecode_only = sum(1 for s in combined.suggestions if s.get('source') == 'bytecode_analysis')

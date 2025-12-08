@@ -1,15 +1,7 @@
 """
-solutions/ir.py
-
 Intermediate Representation (IR) module for JPAMB bytecode analysis.
 
-This module provides the MethodIR class which unifies CFG (Control Flow Graph)
-and statement-level AST representations for downstream analysis components:
-- IIN (dynamic traces): Trace execution on CFG
-- NAB/NAN (refinement): Static analysis on statements
-- NCR (removal): Delete/modify CFG nodes
-
-DTU 02242 Program Analysis - Group 21
+Provides MethodIR class unifying CFG and statement-level representations.
 """
 
 from __future__ import annotations
