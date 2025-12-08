@@ -373,21 +373,10 @@ class DebloaterGUI:
         self.combined_tree = combined_tree
         
         # Bottom panel: Dynamic Profiling Results
-        dynamic_frame = ttk.LabelFrame(right_paned, text="Dynamic Profiling - Cold Code Hints (UNSOUND)", padding="5")
+        dynamic_frame = ttk.LabelFrame(right_paned, text="Dynamic Profiling - Cold Code Hints", padding="5")
         right_paned.add(dynamic_frame, weight=1)
         
-        # Warning label
-        warning_frame = ttk.Frame(dynamic_frame)
-        warning_frame.pack(fill=tk.X, pady=(0, 5))
-        
-        warning_label = ttk.Label(
-            warning_frame,
-            text="UNSOUND: These are hints only! Do NOT use for code deletion!",
-            font=("Arial", 9, "bold"),
-            foreground="orange"
-        )
-        warning_label.pack(side=tk.LEFT)
-        
+      
         # Dynamic profiling tree
         dynamic_tree_frame = ttk.Frame(dynamic_frame)
         dynamic_tree_frame.pack(fill=tk.BOTH, expand=True)
