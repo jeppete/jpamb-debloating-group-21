@@ -43,6 +43,11 @@ class DebloaterGUI:
         self.batch_mode = False
         self.batch_results = None
         self.batch_file_map = {}  # Maps tree item IDs to (file_path, combined_result)
+        self.log_tab = None  # Will be created in show_log_window if needed
+        self._log_buffer = ""  # Buffer for log messages
+        self.batch_file_tabs = {}  # Maps file_path -> (static_tree, dynamic_tree, tab_frame)
+        self.batch_results_data = None  # Store batch results for tab switching
+        self.profiling_method_data = {}  # Store profiling method data
         
         # Setup UI
         self.setup_ui()
@@ -274,38 +279,395 @@ class DebloaterGUI:
                                 relief=tk.RAISED, padx=3, font=('Courier', 8))
         selected_label.pack(side=tk.LEFT, padx=2)
         
-        # Right pane: Notebook for findings
-        findings_frame = ttk.LabelFrame(self.paned_window, text="Analysis Results", padding="5")
-        self.paned_window.add(findings_frame, weight=1)
+        # Right pane: Notebook for batch mode tabs, or direct panel for single file mode
+        right_pane = ttk.Frame(self.paned_window)
+        self.paned_window.add(right_pane, weight=1)
+        self.right_pane = right_pane  # Store reference for single file panel creation
         
-        # Notebook for different views
-        self.notebook = ttk.Notebook(findings_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        # Notebook for file tabs (batch mode only)
+        self.results_notebook = ttk.Notebook(right_pane)
+        self.results_notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Tab 1: Combined Results
-        self.combined_tab = self.create_results_tab("Combined")
-        self.notebook.add(self.combined_tab, text="Combined Results")
+        # Bind tab selection event to load source code
+        self.results_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         
-        # Tab 2: Source Analysis
-        self.source_tab = self.create_results_tab("Source")
-        self.notebook.add(self.source_tab, text="Source Analysis")
+        # Single file view (shown directly, not in a tab)
+        # Initialize profiling method data before creating panel
+        self.profiling_method_data = {}
         
-        # Tab 3: Bytecode Analysis
-        self.bytecode_tab = self.create_results_tab("Bytecode")
-        self.notebook.add(self.bytecode_tab, text="Bytecode Analysis")
+        # Create single file panel (this will set self.combined_tree and self.profiling_tree)
+        self.single_file_frame = self._create_single_file_results_panel()
+        self.single_file_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Tab 4: Dynamic Profiling
-        self.profiling_tab = self.create_profiling_tab()
-        self.notebook.add(self.profiling_tab, text="Dynamic Profiling")
+        # Initialize single file trees (already done in _create_single_file_results_panel)
+        self._initialize_single_file_trees()
         
-        # Tab 5: Log
-        self.log_tab = scrolledtext.ScrolledText(self.notebook, wrap=tk.WORD, 
-                                                 height=15, font=("Courier", 9))
-        self.notebook.add(self.log_tab, text="Log")
+        # Initially hide notebook (show single file panel)
+        self.results_notebook.pack_forget()
+        
+        # Log tab (separate window or keep in notebook)
+        # For now, let's add it as a separate window option or keep minimal
+        # We'll add a log button instead
         
         # ============ BOTTOM: Status Bar ============
         self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN)
         self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+    
+    def _create_single_file_results_panel(self):
+        """Create the results panel for single file mode."""
+        # Use right_pane as parent (same as notebook)
+        parent = getattr(self, 'right_pane', None)
+        if parent is None:
+            # Fallback: use paned_window if right_pane not yet set
+            parent = self.paned_window
+        frame = ttk.Frame(parent)
+        
+        # Vertical PanedWindow to split static and dynamic
+        right_paned = ttk.PanedWindow(frame, orient=tk.VERTICAL)
+        right_paned.pack(fill=tk.BOTH, expand=True)
+        
+        # Top panel: Static Analysis Results
+        static_frame = ttk.LabelFrame(right_paned, text="Static Analysis - Detected Dead Code", padding="5")
+        right_paned.add(static_frame, weight=2)
+        
+        # Static results tree
+        static_tree_frame = ttk.Frame(static_frame)
+        static_tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbars for static tree
+        static_vsb = ttk.Scrollbar(static_tree_frame, orient="vertical")
+        static_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        static_hsb = ttk.Scrollbar(static_tree_frame, orient="horizontal")
+        static_hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Static TreeView
+        combined_tree = ttk.Treeview(static_tree_frame, 
+                           columns=("Line", "Type", "Source", "Message"),
+                           show="tree headings",
+                           yscrollcommand=static_vsb.set,
+                           xscrollcommand=static_hsb.set)
+        
+        combined_tree.heading("#0", text="Item")
+        combined_tree.heading("Line", text="Line")
+        combined_tree.heading("Type", text="Type")
+        combined_tree.heading("Source", text="Source")
+        combined_tree.heading("Message", text="Message")
+        
+        combined_tree.column("#0", width=200)
+        combined_tree.column("Line", width=60, anchor=tk.CENTER)
+        combined_tree.column("Type", width=150)
+        combined_tree.column("Source", width=120)
+        combined_tree.column("Message", width=400)
+        
+        combined_tree.pack(fill=tk.BOTH, expand=True)
+        static_vsb.config(command=combined_tree.yview)
+        static_hsb.config(command=combined_tree.xview)
+        
+        # Bind click event to jump to line
+        combined_tree.bind('<ButtonRelease-1>', lambda event: self.on_tree_click(event, combined_tree))
+        
+        # Store reference
+        self.combined_tree = combined_tree
+        
+        # Bottom panel: Dynamic Profiling Results
+        dynamic_frame = ttk.LabelFrame(right_paned, text="Dynamic Profiling - Cold Code Hints (UNSOUND)", padding="5")
+        right_paned.add(dynamic_frame, weight=1)
+        
+        # Warning label
+        warning_frame = ttk.Frame(dynamic_frame)
+        warning_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        warning_label = ttk.Label(
+            warning_frame,
+            text="UNSOUND: These are hints only! Do NOT use for code deletion!",
+            font=("Arial", 9, "bold"),
+            foreground="orange"
+        )
+        warning_label.pack(side=tk.LEFT)
+        
+        # Dynamic profiling tree
+        dynamic_tree_frame = ttk.Frame(dynamic_frame)
+        dynamic_tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbars for dynamic tree
+        dynamic_vsb = ttk.Scrollbar(dynamic_tree_frame, orient="vertical")
+        dynamic_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        dynamic_hsb = ttk.Scrollbar(dynamic_tree_frame, orient="horizontal")
+        dynamic_hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Dynamic TreeView
+        profiling_tree = ttk.Treeview(dynamic_tree_frame, 
+                           columns=("Method", "Coverage", "Uncovered", "Details"),
+                           show="tree headings",
+                           yscrollcommand=dynamic_vsb.set,
+                           xscrollcommand=dynamic_hsb.set)
+        
+        profiling_tree.heading("#0", text="Item")
+        profiling_tree.heading("Method", text="Method")
+        profiling_tree.heading("Coverage", text="Coverage")
+        profiling_tree.heading("Uncovered", text="Uncovered Lines")
+        profiling_tree.heading("Details", text="Details")
+        
+        profiling_tree.column("#0", width=200)
+        profiling_tree.column("Method", width=200)
+        profiling_tree.column("Coverage", width=80, anchor=tk.CENTER)
+        profiling_tree.column("Uncovered", width=120)
+        profiling_tree.column("Details", width=300)
+        
+        profiling_tree.pack(fill=tk.BOTH, expand=True)
+        dynamic_vsb.config(command=profiling_tree.yview)
+        dynamic_hsb.config(command=profiling_tree.xview)
+        
+        # Bind click event for profiling tree
+        profiling_tree.bind('<ButtonRelease-1>', self.on_profiling_tree_click)
+        
+        # Store reference
+        self.profiling_tree = profiling_tree
+        
+        return frame
+    
+    def _initialize_single_file_trees(self):
+        """Initialize trees for single file mode (already done in _create_single_file_results_panel)."""
+        pass
+    
+    def _create_file_tab(self, file_path: Path, combined_result, profiling_result=None):
+        """Create a tab for a single file with static and dynamic results."""
+        tab_frame = ttk.Frame(self.results_notebook)
+        
+        # Vertical PanedWindow to split static and dynamic
+        right_paned = ttk.PanedWindow(tab_frame, orient=tk.VERTICAL)
+        right_paned.pack(fill=tk.BOTH, expand=True)
+        
+        # Top panel: Static Analysis Results
+        static_frame = ttk.LabelFrame(right_paned, text="Static Analysis - Detected Dead Code", padding="5")
+        right_paned.add(static_frame, weight=2)
+        
+        # Static results tree
+        static_tree_frame = ttk.Frame(static_frame)
+        static_tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbars for static tree
+        static_vsb = ttk.Scrollbar(static_tree_frame, orient="vertical")
+        static_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        static_hsb = ttk.Scrollbar(static_tree_frame, orient="horizontal")
+        static_hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Static TreeView
+        static_tree = ttk.Treeview(static_tree_frame, 
+                           columns=("Line", "Type", "Source", "Message"),
+                           show="tree headings",
+                           yscrollcommand=static_vsb.set,
+                           xscrollcommand=static_hsb.set)
+        
+        static_tree.heading("#0", text="Item")
+        static_tree.heading("Line", text="Line")
+        static_tree.heading("Type", text="Type")
+        static_tree.heading("Source", text="Source")
+        static_tree.heading("Message", text="Message")
+        
+        static_tree.column("#0", width=200)
+        static_tree.column("Line", width=60, anchor=tk.CENTER)
+        static_tree.column("Type", width=150)
+        static_tree.column("Source", width=120)
+        static_tree.column("Message", width=400)
+        
+        static_tree.pack(fill=tk.BOTH, expand=True)
+        static_vsb.config(command=static_tree.yview)
+        static_hsb.config(command=static_tree.xview)
+        
+        # Bind click event to jump to line
+        static_tree.bind('<ButtonRelease-1>', lambda event: self.on_tree_click(event, static_tree))
+        
+        # Populate static tree
+        self._populate_static_tree_for_file(static_tree, combined_result)
+        
+        # Bottom panel: Dynamic Profiling Results
+        dynamic_frame = ttk.LabelFrame(right_paned, text="Dynamic Profiling - Cold Code Hints (UNSOUND)", padding="5")
+        right_paned.add(dynamic_frame, weight=1)
+        
+        # Warning label
+        warning_frame = ttk.Frame(dynamic_frame)
+        warning_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        warning_label = ttk.Label(
+            warning_frame,
+            text="UNSOUND: These are hints only! Do NOT use for code deletion!",
+            font=("Arial", 9, "bold"),
+            foreground="orange"
+        )
+        warning_label.pack(side=tk.LEFT)
+        
+        # Dynamic profiling tree
+        dynamic_tree_frame = ttk.Frame(dynamic_frame)
+        dynamic_tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbars for dynamic tree
+        dynamic_vsb = ttk.Scrollbar(dynamic_tree_frame, orient="vertical")
+        dynamic_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        dynamic_hsb = ttk.Scrollbar(dynamic_tree_frame, orient="horizontal")
+        dynamic_hsb.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Dynamic TreeView
+        dynamic_tree = ttk.Treeview(dynamic_tree_frame, 
+                           columns=("Method", "Coverage", "Uncovered", "Details"),
+                           show="tree headings",
+                           yscrollcommand=dynamic_vsb.set,
+                           xscrollcommand=dynamic_hsb.set)
+        
+        dynamic_tree.heading("#0", text="Item")
+        dynamic_tree.heading("Method", text="Method")
+        dynamic_tree.heading("Coverage", text="Coverage")
+        dynamic_tree.heading("Uncovered", text="Uncovered Lines")
+        dynamic_tree.heading("Details", text="Details")
+        
+        dynamic_tree.column("#0", width=200)
+        dynamic_tree.column("Method", width=200)
+        dynamic_tree.column("Coverage", width=80, anchor=tk.CENTER)
+        dynamic_tree.column("Uncovered", width=120)
+        dynamic_tree.column("Details", width=300)
+        
+        dynamic_tree.pack(fill=tk.BOTH, expand=True)
+        dynamic_vsb.config(command=dynamic_tree.yview)
+        dynamic_hsb.config(command=dynamic_tree.xview)
+        
+        # Populate dynamic tree if profiling result available
+        if profiling_result:
+            self._populate_dynamic_tree_for_file(dynamic_tree, profiling_result, file_path)
+        
+        # Store references
+        self.batch_file_tabs[str(file_path)] = (static_tree, dynamic_tree, tab_frame)
+        
+        # Add tab to notebook
+        file_name = file_path.name
+        self.results_notebook.add(tab_frame, text=file_name)
+        
+        return tab_frame
+    
+    def _populate_static_tree_for_file(self, tree, combined_result):
+        """Populate static analysis tree for a specific file."""
+        # Group by line
+        for line in sorted(combined_result.by_line.keys()):
+            suggestions = combined_result.by_line[line]
+            
+            # Determine source for this line
+            sources = set()
+            for sugg in suggestions:
+                source = sugg.get('source', 'unknown')
+                if source == 'both':
+                    sources.add('Both')
+                elif source == 'source_analysis':
+                    sources.add('Source')
+                elif source == 'bytecode_analysis':
+                    sources.add('Bytecode')
+            
+            source_str = ', '.join(sorted(sources)) if sources else 'Unknown'
+            
+            # Add line as parent
+            line_id = tree.insert("", "end", text=f"Line {line}", 
+                                 values=(line, "", source_str, ""))
+            
+            # Add suggestions as children
+            for sugg in suggestions:
+                sugg_source = sugg.get('source', 'unknown')
+                if sugg_source == 'both':
+                    source_display = 'Both'
+                elif sugg_source == 'source_analysis':
+                    source_display = 'Source'
+                elif sugg_source == 'bytecode_analysis':
+                    source_display = 'Bytecode'
+                else:
+                    source_display = 'Unknown'
+                
+                tree.insert(line_id, "end", text="",
+                          values=(line, sugg['type'], source_display, sugg['message']))
+    
+    def _populate_dynamic_tree_for_file(self, tree, profiling_result, file_path):
+        """Populate dynamic profiling tree for a specific file."""
+        # Load line tables for this file's methods
+        if not profiling_result or not profiling_result.method_profiles:
+            return
+        
+        # Get class name from first method
+        first_method = list(profiling_result.method_profiles.keys())[0]
+        class_name = first_method.rsplit('.', 1)[0] if '.' in first_method else first_method
+        
+        # Load line tables for this file
+        method_data_for_file = {}
+        try:
+            from jpamb import jvm
+            cls = self.suite.findclass(jvm.ClassName(class_name))
+            methods = cls.get("methods", [])
+            
+            for method_dict in methods:
+                method_name = method_dict.get("name", "<unknown>")
+                full_name = f"{class_name}.{method_name}"
+                
+                if full_name in profiling_result.method_profiles:
+                    code = method_dict.get("code", {})
+                    line_table = code.get("lines", [])
+                    bytecode = code.get("bytecode", [])
+                    
+                    method_data_for_file[full_name] = {
+                        'profile': profiling_result.method_profiles[full_name],
+                        'line_table': line_table,
+                        'bytecode': bytecode
+                    }
+        except Exception as e:
+            self.log(f"Warning: Could not load line tables for {file_path.name}: {e}", "WARNING")
+        
+        # Group methods by coverage (low coverage first)
+        profiles_by_coverage = []
+        for name, profile in profiling_result.method_profiles.items():
+            coverage_pct = profile.coverage.get_coverage_percentage()
+            profiles_by_coverage.append((coverage_pct, name, profile))
+        
+        profiles_by_coverage.sort()  # Low coverage first
+        
+        for coverage_pct, name, profile in profiles_by_coverage:
+            executed = len(profile.coverage.executed_indices)
+            uncovered_indices = profile.coverage.get_uncovered_indices()
+            not_executed = len(uncovered_indices)
+            
+            # Get line table for this method
+            method_data = method_data_for_file.get(name, {})
+            line_table = method_data.get('line_table', [])
+            
+            # Map uncovered indices to lines
+            uncovered_lines = set()
+            for idx in uncovered_indices:
+                line_num = self._index_to_line(idx, line_table)
+                if line_num:
+                    uncovered_lines.add(line_num)
+            
+            short_name = name.split(".")[-1] if "." in name else name
+            uncovered_str = ", ".join(str(ln) for ln in sorted(list(uncovered_lines)[:10])) if uncovered_lines else f"{not_executed} indices"
+            if len(uncovered_lines) > 10:
+                uncovered_str = ", ".join(str(ln) for ln in sorted(list(uncovered_lines)[:10])) + f" (+{len(uncovered_lines)-10} more)"
+            
+            method_id = tree.insert("", "end", text=short_name,
+                                   values=(name, f"{coverage_pct:.0f}%", uncovered_str, 
+                                          f"{executed} executed, {not_executed} uncovered"))
+            
+            # Add uncovered lines as children
+            if uncovered_lines:
+                for line in sorted(list(uncovered_lines)[:20]):
+                    tree.insert(method_id, "end", text="",
+                               values=("", "", f"Line {line}", "Not executed during profiling"))
+            
+            # Add value range hints if any
+            if profile.local_ranges:
+                ranges_str = ", ".join([
+                    f"L{idx}: [{data.min_value}, {data.max_value}]" 
+                    for idx, data in list(profile.local_ranges.items())[:3]
+                ])
+                if len(profile.local_ranges) > 3:
+                    ranges_str += f" (+{len(profile.local_ranges)-3} more)"
+                tree.insert(method_id, "end", text="Value ranges",
+                           values=("", "", "", ranges_str))
         
     def create_results_tab(self, name):
         """Create a scrolled text widget for results."""
@@ -324,19 +686,21 @@ class DebloaterGUI:
         
         # TreeView
         tree = ttk.Treeview(tree_frame, 
-                           columns=("Line", "Type", "Message"),
+                           columns=("Line", "Type", "Source", "Message"),
                            show="tree headings",
                            yscrollcommand=vsb.set,
                            xscrollcommand=hsb.set)
         
-        tree.heading("#0", text="Source")
+        tree.heading("#0", text="Item")
         tree.heading("Line", text="Line")
         tree.heading("Type", text="Type")
+        tree.heading("Source", text="Source")
         tree.heading("Message", text="Message")
         
-        tree.column("#0", width=100)
+        tree.column("#0", width=200)
         tree.column("Line", width=60, anchor=tk.CENTER)
         tree.column("Type", width=150)
+        tree.column("Source", width=120)
         tree.column("Message", width=400)
         
         tree.pack(fill=tk.BOTH, expand=True)
@@ -456,16 +820,38 @@ class DebloaterGUI:
             # Hide single file inputs, show batch inputs
             self.single_frame.pack_forget()
             self.batch_frame.pack(fill=tk.X)
+            
+            # Show notebook (for batch tabs), hide single file panel
+            if hasattr(self, 'results_notebook') and hasattr(self, 'single_file_frame'):
+                self.single_file_frame.pack_forget()
+                self.results_notebook.pack(fill=tk.BOTH, expand=True)
         else:
             # Hide batch inputs, show single file inputs
             self.batch_frame.pack_forget()
             self.single_frame.pack(fill=tk.X)
+            
+            # Show single file panel, hide notebook
+            if hasattr(self, 'results_notebook') and hasattr(self, 'single_file_frame'):
+                self.results_notebook.pack_forget()
+                self.single_file_frame.pack(fill=tk.BOTH, expand=True)
     
     
     def log(self, message, level="INFO"):
-        """Add a message to the log tab."""
-        self.log_tab.insert(tk.END, f"[{level}] {message}\n")
-        self.log_tab.see(tk.END)
+        """Add a message to the log buffer and update log window if open."""
+        log_entry = f"[{level}] {message}\n"
+        self._log_buffer += log_entry
+        
+        # Update log window if it exists
+        if hasattr(self, 'log_window') and self.log_window.winfo_exists():
+            try:
+                if hasattr(self.log_window, 'log_text'):
+                    self.log_window.log_text.config(state='normal')
+                    self.log_window.log_text.insert(tk.END, log_entry)
+                    self.log_window.log_text.see(tk.END)
+                    self.log_window.log_text.config(state='disabled')
+            except:
+                pass
+        
         self.root.update()
     
     def update_status(self, message):
@@ -473,23 +859,66 @@ class DebloaterGUI:
         self.status_bar.config(text=message)
         self.root.update()
     
+    def show_log_window(self):
+        """Show log in a separate window."""
+        if not hasattr(self, 'log_window') or not self.log_window.winfo_exists():
+            self.log_window = tk.Toplevel(self.root)
+            self.log_window.title("Analysis Log")
+            self.log_window.geometry("800x600")
+            
+            log_text = scrolledtext.ScrolledText(self.log_window, wrap=tk.WORD, 
+                                                 font=("Courier", 9))
+            log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Copy content from log buffer
+            if hasattr(self, '_log_buffer'):
+                log_text.insert(1.0, self._log_buffer)
+            log_text.config(state='disabled')
+            
+            self.log_window.log_text = log_text
+            self.log_tab = log_text  # Store reference for updates
+        
+        self.log_window.lift()
+        self.log_window.focus()
+        
+        # Update content if log buffer exists
+        if hasattr(self, '_log_buffer') and hasattr(self.log_window, 'log_text'):
+            try:
+                self.log_window.log_text.config(state='normal')
+                self.log_window.log_text.delete(1.0, tk.END)
+                self.log_window.log_text.insert(1.0, self._log_buffer)
+                self.log_window.log_text.config(state='disabled')
+            except:
+                pass
+    
     def clear_results(self):
         """Clear all results and reset UI."""
-        # Clear trees
-        for tree_name in ['combined_tree', 'source_tree', 'bytecode_tree', 'profiling_tree']:
-            tree = getattr(self, tree_name, None)
-            if tree:
-                for item in tree.get_children():
-                    tree.delete(item)
+        # Clear static analysis tree
+        if hasattr(self, 'combined_tree') and self.combined_tree is not None:
+            for item in self.combined_tree.get_children():
+                self.combined_tree.delete(item)
         
-        # Reset profiling stats
-        if hasattr(self, 'prof_methods_label'):
-            self.prof_methods_label.config(text="Methods: 0")
-            self.prof_executions_label.config(text="Executions: 0")
-            self.prof_coverage_label.config(text="Avg Coverage: 0%")
+        # Clear profiling tree
+        if hasattr(self, 'profiling_tree') and self.profiling_tree is not None:
+            for item in self.profiling_tree.get_children():
+                self.profiling_tree.delete(item)
         
-        # Clear log
-        self.log_tab.delete(1.0, tk.END)
+        # Clear profiling method data
+        if hasattr(self, 'profiling_method_data'):
+            self.profiling_method_data.clear()
+        
+        # Clear log buffer
+        if hasattr(self, '_log_buffer'):
+            self._log_buffer = ""
+        
+        # Clear log window if it exists
+        if hasattr(self, 'log_tab') and self.log_tab:
+            try:
+                self.log_tab.config(state='normal')
+                self.log_tab.delete(1.0, tk.END)
+                self.log_tab.config(state='disabled')
+            except:
+                pass
         
         # Clear source code viewer
         self.source_text.config(state='normal')
@@ -605,6 +1034,50 @@ class DebloaterGUI:
         # Also scroll line numbers
         self.line_numbers.see(start)
     
+    def on_tab_changed(self, event):
+        """Handle tab selection change to load corresponding source file."""
+        if not hasattr(self, 'results_notebook'):
+            return
+        
+        try:
+            selected_index = self.results_notebook.index(self.results_notebook.select())
+            tab_text = self.results_notebook.tab(selected_index, "text")
+            
+            # Find the file path for this tab
+            file_path = None
+            combined = None
+            
+            # Look in batch_file_tabs
+            for file_path_str, (static_tree, dynamic_tree, tab_frame) in self.batch_file_tabs.items():
+                path_obj = Path(file_path_str)
+                if path_obj.name == tab_text:
+                    file_path = path_obj
+                    # Get the combined result from batch_results_data
+                    if self.batch_results_data:
+                        combined = self.batch_results_data.results_by_file.get(str(file_path))
+                    break
+            
+            # If not found in batch_file_tabs, try to find in batch_results_data
+            if file_path is None and self.batch_results_data:
+                for file_path_str, combined_result in self.batch_results_data.results_by_file.items():
+                    path_obj = Path(file_path_str)
+                    if path_obj.name == tab_text:
+                        file_path = path_obj
+                        combined = combined_result
+                        break
+            
+            # Load the source file if found
+            if file_path and file_path.exists():
+                self.load_source_code(file_path)
+                self.current_file_label.config(text=str(file_path))
+                
+                # Highlight dead code if we have combined results
+                if combined:
+                    self.highlight_dead_code(combined.by_line)
+        except Exception as e:
+            # Silently ignore errors (e.g., when tabs are being created/removed)
+            pass
+    
     def on_tree_click(self, event, tree):
         """Handle click on tree item to jump to that line or load file in batch mode."""
         # Get selected item
@@ -614,8 +1087,9 @@ class DebloaterGUI:
         
         item = selection[0]
         values = tree.item(item, 'values')
+        item_text = tree.item(item, 'text')
         
-        # Check if this is a batch mode item
+        # Check if this is a batch mode file overview item
         if item in self.batch_file_map:
             file_path, combined = self.batch_file_map[item]
             
@@ -623,26 +1097,41 @@ class DebloaterGUI:
             if file_path.exists():
                 self.load_source_code(file_path)
                 self.highlight_dead_code(combined.by_line)
-                
-                # If there's a line number, jump to it
-                if values and values[0]:
-                    try:
-                        line_num = int(values[0])
+                self.current_file_label.config(text=str(file_path))
+            
+            # Switch to this file's tab if it exists
+            file_path_str = str(file_path)
+            if file_path_str in self.batch_file_tabs:
+                # Find the tab index
+                for i in range(self.results_notebook.index("end")):
+                    tab_text = self.results_notebook.tab(i, "text")
+                    if tab_text == file_path.name:
+                        self.results_notebook.select(i)
+                        break
+            
+            # Try to extract line number from values
+            if values and len(values) > 0:
+                try:
+                    line_num = int(values[0])
+                    if line_num > 0:
                         self.jump_to_line(line_num)
-                    except (ValueError, IndexError):
-                        pass
-            return
-        
-        # Single file mode: just jump to line
-        if values and values[0]:
-            try:
-                line_num = int(values[0])
-                self.jump_to_line(line_num)
-            except (ValueError, IndexError):
-                pass  # Not a valid line number
+                except (ValueError, TypeError):
+                    pass
+        else:
+            # Single file mode or file tab - extract line number
+            if values and len(values) > 0:
+                try:
+                    line_num = int(values[0])
+                    if line_num > 0:
+                        self.jump_to_line(line_num)
+                except (ValueError, TypeError):
+                    pass
     
     def on_profiling_tree_click(self, event):
         """Handle click on profiling tree to highlight uncovered code in source viewer."""
+        if not hasattr(self, 'profiling_tree') or self.profiling_tree is None:
+            return
+        
         selection = self.profiling_tree.selection()
         if not selection:
             return
@@ -812,10 +1301,12 @@ class DebloaterGUI:
             
             # Create batch debloater with settings
             enable_abstract = self.abstract_interp_var.get()
+            enable_profiling = self.dynamic_profiling_var.get()
             batch_debloater = BatchDebloaterWithGUILogging(
                 self.suite, self,
                 enable_abstract_interpreter=enable_abstract,
-                abstract_domain="product"  # Always use product domain
+                abstract_domain="product",  # Always use product domain
+                enable_dynamic_profiling=enable_profiling
             )
             
             self.log(f"Scanning directory: {directory}")
@@ -853,6 +1344,12 @@ class DebloaterGUI:
         if not self.debloater or not self.debloater.results:
             return
         
+        # Show single file panel and hide notebook
+        if hasattr(self, 'results_notebook') and hasattr(self, 'single_file_frame'):
+            # Hide notebook, show single file panel
+            self.results_notebook.pack_forget()
+            self.single_file_frame.pack(fill=tk.BOTH, expand=True)
+        
         results = self.debloater.results
         
         # Update statistics
@@ -862,7 +1359,6 @@ class DebloaterGUI:
         
         if source_result:
             self.source_count_label.config(text=str(len(source_result.findings)))
-            self.populate_source_tree(source_result)
         
         if bytecode_result:
             dead_count = bytecode_result.get_dead_instruction_count()
@@ -870,26 +1366,42 @@ class DebloaterGUI:
             percentage = bytecode_result.get_debloat_percentage()
             self.bytecode_count_label.config(text=f"{dead_count} / {total_count} ({percentage:.1f}%)")
             self.methods_count_label.config(text=str(len(bytecode_result.unreachable_methods)))
-            self.populate_bytecode_tree(bytecode_result)
         
         if combined:
             # Count verified by both
             both_count = sum(1 for s in combined.suggestions if s.get('source') == 'both')
             self.verified_count_label.config(text=str(both_count))
             self.total_lines_label.config(text=str(combined.total_dead_lines))
+            
+            # Populate static analysis tree (no profiling data mixed in)
             self.populate_combined_tree(combined)
             # Highlight dead code in source viewer
             self.highlight_dead_code(combined.by_line)
         
-        # Display profiling results if available
+        # Display profiling results separately if available
         profiling_result = results.get('profiling')
         if profiling_result:
             self.populate_profiling_tree(profiling_result)
     
     def display_batch_results(self, batch_result: BatchResult):
         """Display batch analysis results in the UI."""
-        # Clear previous batch file mappings
+        # Store batch results for later use
+        self.batch_results_data = batch_result
+        
+        # Clear previous batch file mappings and tabs
         self.batch_file_map.clear()
+        self.batch_file_tabs.clear()
+        
+        # Clear existing batch tabs
+        if hasattr(self, 'results_notebook'):
+            # Remove all tabs
+            while self.results_notebook.index("end") > 0:
+                self.results_notebook.forget(0)
+            
+            # Show notebook, hide single file panel
+            if hasattr(self, 'single_file_frame'):
+                self.single_file_frame.pack_forget()
+                self.results_notebook.pack(fill=tk.BOTH, expand=True)
         
         # Update overall statistics
         self.total_lines_label.config(text=str(batch_result.total_dead_lines))
@@ -902,107 +1414,89 @@ class DebloaterGUI:
             text=f"{batch_result.total_dead_instructions} / {batch_result.total_instructions} ({percentage:.1f}%)"
         )
         
-        # Populate combined tree with file-by-file results
-        tree = self.combined_tree
+        # Get profiling results
+        profiling_by_file = getattr(batch_result, 'profiling_by_file', {})
         
+        # Create a tab for each file
         for file_path, combined in batch_result.results_by_file.items():
-            file_name = Path(file_path).name
+            file_path_obj = Path(file_path)
+            profiling_result = profiling_by_file.get(str(file_path))
             
-            # Add file as top-level parent
-            verified = sum(1 for s in combined.suggestions if s.get('source') == 'both')
-            file_id = tree.insert("", "end", text=file_name,
-                                 values=("", f"{combined.total_dead_lines} dead lines", 
-                                       f"Verified: {verified}"))
-            
-            # Store mapping for this file
-            self.batch_file_map[file_id] = (Path(file_path), combined)
-            
-            # Add dead lines under each file
-            for line in sorted(combined.by_line.keys())[:20]:  # Limit to first 20 per file
-                suggestions = combined.by_line[line]
-                
-                for sugg in suggestions:
-                    child_id = tree.insert(file_id, "end", text="",
-                                          values=(line, sugg['type'], sugg['message']))
-                    # Store parent file mapping for children too
-                    self.batch_file_map[child_id] = (Path(file_path), combined)
-            
-            if len(combined.by_line) > 20:
-                more_id = tree.insert(file_id, "end", text="...",
-                                     values=("", "", f"and {len(combined.by_line) - 20} more lines"))
-                self.batch_file_map[more_id] = (Path(file_path), combined)
+            # Create tab for this file
+            self._create_file_tab(file_path_obj, combined, profiling_result)
         
-        # Add errors if any
-        if batch_result.errors_by_file:
-            error_id = tree.insert("", "end", text="Errors",
-                                  values=("", f"{len(batch_result.errors_by_file)} files", ""))
-            for file_path, error in batch_result.errors_by_file.items():
-                file_name = Path(file_path).name
-                tree.insert(error_id, "end", text="",
-                          values=("", file_name, error))
+        # Select first file tab if any exist (this will trigger on_tab_changed)
+        if hasattr(self, 'results_notebook') and self.results_notebook.index("end") > 0:
+            self.results_notebook.select(0)
+            # Manually trigger tab change to load source code for first file
+            self.on_tab_changed(None)
     
-    def populate_combined_tree(self, combined):
-        """Populate the combined results tree."""
+    def populate_combined_tree(self, combined, profiling_result=None):
+        """Populate the combined results tree with source information."""
         tree = self.combined_tree
+        if tree is None:
+            return
+        
+        # Build mapping of lines to profiling uncovered lines if available
+        profiling_uncovered_lines = set()
+        if profiling_result:
+            for method_name, profile in profiling_result.method_profiles.items():
+                uncovered_indices = profile.coverage.get_uncovered_indices()
+                # Try to map indices to lines (simplified - would need line table)
+                # For now, we'll mark lines that have profiling hints separately
+                pass
         
         # Group by line
         for line in sorted(combined.by_line.keys()):
             suggestions = combined.by_line[line]
             
+            # Determine source for this line (could be multiple)
+            sources = set()
+            for sugg in suggestions:
+                source = sugg.get('source', 'unknown')
+                if source == 'both':
+                    sources.add('Both')
+                elif source == 'source_analysis':
+                    sources.add('Source')
+                elif source == 'bytecode_analysis':
+                    sources.add('Bytecode')
+            
+            # Check if this line is also uncovered by profiling
+            if profiling_result:
+                # This is a simplified check - in practice would need line mapping
+                sources.add('Dynamic Profiling')
+            
+            source_str = ', '.join(sorted(sources)) if sources else 'Unknown'
+            
             # Add line as parent
             line_id = tree.insert("", "end", text=f"Line {line}", 
-                                 values=(line, "", ""))
+                                 values=(line, "", source_str, ""))
             
             # Add suggestions as children
             for sugg in suggestions:
+                sugg_source = sugg.get('source', 'unknown')
+                if sugg_source == 'both':
+                    source_display = 'Both'
+                elif sugg_source == 'source_analysis':
+                    source_display = 'Source'
+                elif sugg_source == 'bytecode_analysis':
+                    source_display = 'Bytecode'
+                else:
+                    source_display = 'Unknown'
+                
                 tree.insert(line_id, "end", text="",
-                          values=(line, sugg['type'], sugg['message']))
-    
-    def populate_source_tree(self, source_result):
-        """Populate the source analysis tree."""
-        tree = self.source_tree
-        
-        for finding in source_result.findings:
-            tree.insert("", "end", text="",
-                       values=(finding.line, finding.kind, finding.message))
-    
-    def populate_bytecode_tree(self, bytecode_result):
-        """Populate the bytecode analysis tree."""
-        tree = self.bytecode_tree
-        
-        # Add unreachable methods
-        if bytecode_result.unreachable_methods:
-            unreachable_id = tree.insert("", "end", text="Unreachable Methods",
-                                        values=("", "", f"{len(bytecode_result.unreachable_methods)} methods"))
-            for method in sorted(bytecode_result.unreachable_methods):
-                tree.insert(unreachable_id, "end", text="",
-                           values=("", "unreachable", method))
-        
-        # Add dead instructions by method
-        for method, offsets in sorted(bytecode_result.dead_instructions.items()):
-            method_id = tree.insert("", "end", text=method,
-                                   values=("", "dead_instructions", f"{len(offsets)} offsets"))
-            for offset in sorted(offsets):
-                tree.insert(method_id, "end", text="",
-                           values=("", "dead_code", f"offset {offset}"))
+                          values=(line, sugg['type'], source_display, sugg['message']))
     
     def populate_profiling_tree(self, profiling_result):
         """Populate the dynamic profiling results tree."""
         tree = self.profiling_tree
+        if tree is None:
+            return
         
         # Clear existing items and method data
         for item in tree.get_children():
             tree.delete(item)
         self.profiling_method_data.clear()
-        
-        # Update summary stats
-        method_count = len(profiling_result.method_profiles)
-        total_execs = profiling_result.total_executions
-        avg_coverage = profiling_result._get_average_coverage()
-        
-        self.prof_methods_label.config(text=f"Methods: {method_count}")
-        self.prof_executions_label.config(text=f"Executions: {total_execs}")
-        self.prof_coverage_label.config(text=f"Avg Coverage: {avg_coverage:.1f}%")
         
         # Load line tables for all profiled methods
         self._load_method_line_tables(profiling_result)
@@ -1021,70 +1515,58 @@ class DebloaterGUI:
             uncovered_indices = profile.coverage.get_uncovered_indices()
             not_executed = len(uncovered_indices)
             
-            # Format value ranges
-            value_ranges = []
-            for idx, range_data in profile.local_ranges.items():
-                if range_data.min_value is not None:
-                    if range_data.min_value >= 0:
-                        hint = "≥0"
-                    elif range_data.max_value is not None and range_data.max_value <= 0:
-                        hint = "≤0"
-                    else:
-                        hint = f"[{range_data.min_value}, {range_data.max_value}]"
-                    value_ranges.append(f"L{idx}: {hint}")
+            # Get line table for this method
+            method_data = self.profiling_method_data.get(name, {})
+            line_table = method_data.get('line_table', [])
             
-            value_ranges_str = ", ".join(value_ranges[:3])
-            if len(value_ranges) > 3:
-                value_ranges_str += f" (+{len(value_ranges)-3} more)"
+            # Map uncovered indices to lines
+            uncovered_lines = set()
+            for idx in uncovered_indices:
+                line_num = self._index_to_line(idx, line_table)
+                if line_num:
+                    uncovered_lines.add(line_num)
             
             # Short method name for display
             short_name = name.split(".")[-1] if "." in name else name
             
+            # Format uncovered lines display
+            if uncovered_lines:
+                uncovered_str = ", ".join(str(ln) for ln in sorted(list(uncovered_lines)[:10]))
+                if len(uncovered_lines) > 10:
+                    uncovered_str += f" (+{len(uncovered_lines)-10} more)"
+            else:
+                uncovered_str = f"{not_executed} indices"
+            
             # Add method row
             method_id = tree.insert("", "end", text=short_name,
-                                   values=(f"{coverage_pct:.0f}%", 
-                                          str(executed), 
-                                          str(not_executed),
-                                          value_ranges_str))
+                                   values=(name, f"{coverage_pct:.0f}%", uncovered_str, 
+                                          f"{executed} executed, {not_executed} uncovered"))
             
-            # Add children for not-executed code (show lines if available)
-            if not_executed > 0:
-                # Get line table for this method
-                method_data = self.profiling_method_data.get(name, {})
-                line_table = method_data.get('line_table', [])
-                
-                # Map indices to lines
-                uncovered_lines = set()
-                for idx in uncovered_indices:
-                    line_num = self._index_to_line(idx, line_table)
-                    if line_num:
-                        uncovered_lines.add(line_num)
-                
-                if uncovered_lines:
-                    not_exec_id = tree.insert(method_id, "end", text="Uncovered lines:",
-                                             values=("", "", "", ""))
-                    lines_str = ", ".join(str(ln) for ln in sorted(uncovered_lines))
-                    tree.insert(not_exec_id, "end", text="",
-                               values=("", "", "", f"Lines: {lines_str}"))
-                else:
-                    # Fallback to showing indices if no line mapping
-                    not_exec_id = tree.insert(method_id, "end", text="Uncovered indices:",
-                                             values=("", "", "", ""))
-                    indices_str = ", ".join(str(i) for i in sorted(list(uncovered_indices)[:20]))
-                    if len(uncovered_indices) > 20:
-                        indices_str += f" (+{len(uncovered_indices)-20} more)"
-                    tree.insert(not_exec_id, "end", text="",
-                               values=("", "", "", indices_str))
+            # Add children for uncovered lines if available
+            if uncovered_lines:
+                for line in sorted(list(uncovered_lines)[:20]):
+                    tree.insert(method_id, "end", text="",
+                               values=("", "", f"Line {line}", f"Not executed during profiling"))
             
-            # Add children for value ranges if any
+            # Add value range hints if any
             if profile.local_ranges:
-                ranges_id = tree.insert(method_id, "end", text="Value ranges:",
-                                       values=("", "", "", ""))
-                for idx, range_data in profile.local_ranges.items():
-                    if range_data.min_value is not None:
-                        range_str = f"[{range_data.min_value}, {range_data.max_value}]"
-                        tree.insert(ranges_id, "end", text=f"  Local {idx}",
-                                   values=("", "", "", range_str))
+                ranges_str = ", ".join([
+                    f"L{idx}: [{data.min_value}, {data.max_value}]" 
+                    for idx, data in list(profile.local_ranges.items())[:3]
+                ])
+                if len(profile.local_ranges) > 3:
+                    ranges_str += f" (+{len(profile.local_ranges)-3} more)"
+                tree.insert(method_id, "end", text="Value ranges",
+                           values=("", "", "", ranges_str))
+    
+    def _get_method_data_for_profiling(self, profiling_result, method_name):
+        """Get method data (line table, etc.) for a profiled method."""
+        # Try to get from cached data
+        if method_name in self.profiling_method_data:
+            return self.profiling_method_data[method_name]
+        
+        # Otherwise return empty dict
+        return {}
     
     def _load_method_line_tables(self, profiling_result):
         """Load line tables from bytecode for all profiled methods."""
@@ -1218,14 +1700,16 @@ class DebloaterWithGUILogging(Debloater):
 class BatchDebloaterWithGUILogging(BatchDebloater):
     """Batch debloater that logs to GUI instead of console."""
     
-    def __init__(self, suite, gui, enable_abstract_interpreter=True, abstract_domain="product"):
+    def __init__(self, suite, gui, enable_abstract_interpreter=True, abstract_domain="product",
+                 enable_dynamic_profiling=False):
         super().__init__(suite)
         self.gui = gui
         # Replace the internal debloater with GUI-logging version
         self.debloater = DebloaterWithGUILogging(
             suite, gui, 
             enable_abstract_interpreter, 
-            abstract_domain
+            abstract_domain,
+            enable_dynamic_profiling=enable_dynamic_profiling
         )
     
     def analyze_files(self, files, show_progress=True):
@@ -1251,11 +1735,21 @@ class BatchDebloaterWithGUILogging(BatchDebloater):
                 # Get results
                 combined = self.debloater.results.get('combined')
                 bytecode_result = self.debloater.results.get('bytecode')
+                profiling_result = self.debloater.results.get('profiling')
                 
                 if combined:
                     batch_result.successful_files += 1
                     batch_result.results_by_file[str(source_file)] = combined
                     batch_result.total_dead_lines += combined.total_dead_lines
+                    
+                    # Store profiling results if available
+                    if not hasattr(batch_result, 'profiling_by_file'):
+                        batch_result.profiling_by_file = {}
+                    if profiling_result:
+                        try:
+                            batch_result.profiling_by_file[str(source_file)] = profiling_result
+                        except Exception as e:
+                            self.gui.log(f"  Warning: Could not store profiling result: {e}", "WARNING")
                     
                     # Count by confidence
                     verified = sum(1 for s in combined.suggestions if s.get('source') == 'both')

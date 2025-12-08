@@ -225,11 +225,22 @@ class InputGenerator:
         inputs.extend(systematic[:num_samples])
         
         # Add random samples if needed
-        while len(inputs) < num_samples:
+        attempts = 0
+        max_attempts = num_samples * 5  # cap to avoid infinite loops on unsupported types
+        while len(inputs) < num_samples and attempts < max_attempts:
             random_input = self._generate_random(params)
+            attempts += 1
             if random_input:
                 inputs.append(random_input)
+            else:
+                # stop early if nothing can be generated
+                if attempts >= max_attempts:
+                    break
         
+        # Ensure at least one input to avoid empty profiling runs
+        if not inputs:
+            inputs.append(jpamb.model.Input(tuple()))
+
         return inputs[:num_samples]
     
     def _generate_systematic(self, params: jvm.ParameterType) -> List[jpamb.model.Input]:
@@ -293,6 +304,9 @@ class InputGenerator:
                 values.append(jvm.Value.int(val))
             elif isinstance(param_type, jvm.Boolean):
                 values.append(jvm.Value.boolean(self.rng.choice([True, False])))
+            elif isinstance(param_type, jvm.Reference):
+                # Fallback: use null reference for unsupported reference types/arrays
+                values.append(jvm.Value(jvm.Reference(), None))
             else:
                 # Unsupported type
                 return None
