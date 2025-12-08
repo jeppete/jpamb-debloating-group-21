@@ -849,7 +849,7 @@ class DebloaterGUI:
                     self.log_window.log_text.insert(tk.END, log_entry)
                     self.log_window.log_text.see(tk.END)
                     self.log_window.log_text.config(state='disabled')
-            except:
+            except Exception:
                 pass
         
         self.root.update()
@@ -888,7 +888,7 @@ class DebloaterGUI:
                 self.log_window.log_text.delete(1.0, tk.END)
                 self.log_window.log_text.insert(1.0, self._log_buffer)
                 self.log_window.log_text.config(state='disabled')
-            except:
+            except Exception:
                 pass
     
     def clear_results(self):
@@ -917,7 +917,7 @@ class DebloaterGUI:
                 self.log_tab.config(state='normal')
                 self.log_tab.delete(1.0, tk.END)
                 self.log_tab.config(state='disabled')
-            except:
+            except Exception:
                 pass
         
         # Clear source code viewer
