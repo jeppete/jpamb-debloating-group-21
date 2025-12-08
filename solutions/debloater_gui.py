@@ -75,6 +75,8 @@ class DebloaterGUI:
         btn_section.pack(side=tk.RIGHT)
         
         ttk.Button(btn_section, text="Clear", command=self.clear_results).pack(side=tk.RIGHT, padx=4)
+        self.debloat_btn = ttk.Button(btn_section, text="Debloat", command=self.debloat, state='disabled')
+        self.debloat_btn.pack(side=tk.RIGHT, padx=4)
         self.analyze_btn = ttk.Button(btn_section, text="Analyze", command=self.run_analysis)
         self.analyze_btn.pack(side=tk.RIGHT, padx=4)
         
@@ -942,6 +944,9 @@ class DebloaterGUI:
         self.verified_count_label.config(text="0")
         self.total_lines_label.config(text="0")
         
+        # Disable debloat button
+        self.debloat_btn.config(state='disabled')
+        
         self.update_status("Cleared")
     
     def load_source_code(self, source_file: Path):
@@ -1241,6 +1246,9 @@ class DebloaterGUI:
             
             source_file = Path(source_str) if source_str else None
             
+            # Store current source file for debloat functionality
+            self.current_source = source_file
+            
             self.log(f"Analyzing class: {class_str}")
             if source_file:
                 self.log(f"Source file: {source_file}")
@@ -1265,6 +1273,9 @@ class DebloaterGUI:
             
             # Display results
             self.display_results()
+            
+            # Enable debloat button after successful analysis
+            self.debloat_btn.config(state='normal')
             
             self.log("Analysis complete!", "SUCCESS")
             self.update_status("Analysis complete")
@@ -1326,6 +1337,9 @@ class DebloaterGUI:
             
             # Display batch results
             self.display_batch_results(batch_result)
+            
+            # Enable debloat button after successful analysis
+            self.debloat_btn.config(state='normal')
             
             self.log(f"Batch analysis complete! Processed {batch_result.successful_files}/{batch_result.total_files} files", "SUCCESS")
             self.update_status("Batch analysis complete")
@@ -1603,6 +1617,245 @@ class DebloaterGUI:
                     }
         except Exception as e:
             self.log(f"Warning: Could not load line tables: {e}", "WARNING")
+    
+    def debloat(self):
+        """Remove all 100% dead code found by static analyses from source files."""
+        # Check if button is enabled
+        if self.debloat_btn.cget('state') == 'disabled':
+            import tkinter.messagebox as messagebox
+            messagebox.showwarning("Debloat Disabled", "Please run analysis first before debloating.")
+            return
+        
+        self.log("Debloat button clicked", "INFO")
+        try:
+            if self.batch_mode:
+                self.log("Running batch debloat...", "INFO")
+                self._debloat_batch()
+            else:
+                self.log("Running single file debloat...", "INFO")
+                self._debloat_single_file()
+        except Exception as e:
+            self.log(f"Error in debloat: {e}", "ERROR")
+            import traceback
+            self.log(traceback.format_exc(), "ERROR")
+            import tkinter.messagebox as messagebox
+            messagebox.showerror("Debloat Error", f"An error occurred during debloat:\n{e}")
+    
+    def _debloat_single_file(self):
+        """Remove dead code from a single source file."""
+        self.log("Starting single file debloat...", "INFO")
+        
+        if not self.debloater:
+            self.log("Error: No debloater instance available", "ERROR")
+            return
+            
+        if not self.debloater.results:
+            self.log("Error: No analysis results available", "ERROR")
+            return
+        
+        self.log(f"Debloater results keys: {list(self.debloater.results.keys())}", "INFO")
+        
+        combined = self.debloater.results.get('combined')
+        if not combined:
+            self.log("Error: No combined results available", "ERROR")
+            return
+        
+        self.log(f"Combined result has {len(combined.by_line)} lines with dead code", "INFO")
+        
+        if not self.current_source:
+            self.log("Error: No current source file set", "ERROR")
+            return
+            
+        if not self.current_source.exists():
+            self.log(f"Error: Source file not found: {self.current_source}", "ERROR")
+            return
+        
+        self.log(f"Source file: {self.current_source}", "INFO")
+        
+        # Get dead lines from static analysis only (exclude dynamic profiling and wildcard imports)
+        dead_lines = set()
+        for line, suggestions in combined.by_line.items():
+            # Skip wildcard imports - they can be narrowed, not removed
+            is_wildcard_import = False
+            for sugg in suggestions:
+                sugg_type = sugg.get('type', '')
+                if sugg_type == 'import_wildcard':
+                    is_wildcard_import = True
+                    break
+            
+            if is_wildcard_import:
+                self.log(f"Skipping line {line}: wildcard import (can be narrowed, not removed)", "INFO")
+                continue
+            
+            # Check if any suggestion is from static analysis
+            has_static = False
+            for sugg in suggestions:
+                source = sugg.get('source', 'unknown')
+                if source in ('source_analysis', 'bytecode_analysis', 'both'):
+                    has_static = True
+                    break
+            
+            if has_static:
+                dead_lines.add(line)
+        
+        if not dead_lines:
+            self.log("No dead code found by static analysis to remove", "INFO")
+            import tkinter.messagebox as messagebox
+            messagebox.showinfo("No Dead Code", "No dead code was found by static analysis to remove.\n\nOnly code verified by static analysis (source or bytecode) is removed.")
+            return
+        
+        # Confirm with user
+        import tkinter.messagebox as messagebox
+        response = messagebox.askyesno(
+            "Confirm Debloat",
+            f"Remove {len(dead_lines)} dead code line(s) from {self.current_source.name}?\n\n"
+            f"This will create a backup of the original file."
+        )
+        
+        if not response:
+            return
+        
+        try:
+            # Create backup
+            backup_path = self.current_source.with_suffix(self.current_source.suffix + '.bak')
+            with open(self.current_source, 'r', encoding='utf-8') as f:
+                original_content = f.read()
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                f.write(original_content)
+            
+            # Remove dead lines
+            lines = original_content.splitlines(keepends=True)
+            new_lines = []
+            removed_count = 0
+            
+            for i, line in enumerate(lines):
+                line_num = i + 1
+                if line_num not in dead_lines:
+                    new_lines.append(line)
+                else:
+                    removed_count += 1
+            
+            # Write modified content
+            with open(self.current_source, 'w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+            
+            self.log(f"Debloated {self.current_source.name}: removed {removed_count} line(s)", "SUCCESS")
+            self.log(f"Backup saved to: {backup_path}", "INFO")
+            
+            # Reload source code in viewer
+            self.load_source_code(self.current_source)
+            
+            # Clear and refresh results (dead code is now removed)
+            self.clear_results()
+            self.update_status("Debloat complete - file modified")
+            
+        except Exception as e:
+            self.log(f"Error during debloat: {e}", "ERROR")
+            import traceback
+            self.log(traceback.format_exc(), "ERROR")
+    
+    def _debloat_batch(self):
+        """Remove dead code from all files in batch results."""
+        if not self.batch_results_data:
+            self.log("Error: No batch analysis results available", "ERROR")
+            return
+        
+        # Collect dead lines for each file
+        files_to_debloat = {}
+        total_dead_lines = 0
+        
+        for file_path, combined in self.batch_results_data.results_by_file.items():
+            dead_lines = set()
+            for line, suggestions in combined.by_line.items():
+                # Skip wildcard imports - they can be narrowed, not removed
+                is_wildcard_import = False
+                for sugg in suggestions:
+                    sugg_type = sugg.get('type', '')
+                    if sugg_type == 'import_wildcard':
+                        is_wildcard_import = True
+                        break
+                
+                if is_wildcard_import:
+                    continue
+                
+                # Check if any suggestion is from static analysis
+                has_static = False
+                for sugg in suggestions:
+                    source = sugg.get('source', 'unknown')
+                    if source in ('source_analysis', 'bytecode_analysis', 'both'):
+                        has_static = True
+                        break
+                
+                if has_static:
+                    dead_lines.add(line)
+            
+            if dead_lines:
+                files_to_debloat[file_path] = dead_lines
+                total_dead_lines += len(dead_lines)
+        
+        if not files_to_debloat:
+            self.log("No dead code found by static analysis to remove", "INFO")
+            return
+        
+        # Confirm with user
+        import tkinter.messagebox as messagebox
+        response = messagebox.askyesno(
+            "Confirm Batch Debloat",
+            f"Remove dead code from {len(files_to_debloat)} file(s)?\n\n"
+            f"Total dead lines: {total_dead_lines}\n\n"
+            f"This will create backups of all original files."
+        )
+        
+        if not response:
+            return
+        
+        # Process each file
+        success_count = 0
+        error_count = 0
+        
+        for file_path, dead_lines in files_to_debloat.items():
+            source_file = Path(file_path)
+            if not source_file.exists():
+                self.log(f"Warning: File not found: {source_file}", "WARNING")
+                error_count += 1
+                continue
+            
+            try:
+                # Create backup
+                backup_path = source_file.with_suffix(source_file.suffix + '.bak')
+                with open(source_file, 'r', encoding='utf-8') as f:
+                    original_content = f.read()
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    f.write(original_content)
+                
+                # Remove dead lines
+                lines = original_content.splitlines(keepends=True)
+                new_lines = []
+                removed_count = 0
+                
+                for i, line in enumerate(lines):
+                    line_num = i + 1
+                    if line_num not in dead_lines:
+                        new_lines.append(line)
+                    else:
+                        removed_count += 1
+                
+                # Write modified content
+                with open(source_file, 'w', encoding='utf-8') as f:
+                    f.writelines(new_lines)
+                
+                self.log(f"Debloated {source_file.name}: removed {removed_count} line(s)", "SUCCESS")
+                success_count += 1
+                
+            except Exception as e:
+                self.log(f"Error debloating {source_file.name}: {e}", "ERROR")
+                error_count += 1
+        
+        self.log(f"Batch debloat complete: {success_count} file(s) processed, {error_count} error(s)", "SUCCESS")
+        self.update_status(f"Debloat complete - {success_count} file(s) modified")
+        
+        # Clear and refresh results
+        self.clear_results()
 
 
 class DebloaterWithGUILogging(Debloater):
